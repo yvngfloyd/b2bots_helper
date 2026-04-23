@@ -1,32 +1,21 @@
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from app.config import settings
 
 
-def main_menu(site_url: str, tg_channel_url: str) -> InlineKeyboardMarkup:
+
+def main_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(text='Оставить заявку', callback_data='start_form')
-    )
-    builder.row(
-        InlineKeyboardButton(text='Сайт', url=site_url),
-        InlineKeyboardButton(text='Telegram-канал', url=tg_channel_url),
-    )
+    builder.button(text="Оставить заявку", callback_data="start_form")
+    builder.button(text="Сайт", url=settings.site_url)
+    builder.button(text="Telegram-канал", url=settings.tg_channel_url)
+    builder.adjust(1, 2)
     return builder.as_markup()
 
 
 
-def yes_no_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text='Да'), KeyboardButton(text='Нет')]],
-        resize_keyboard=True,
-        one_time_keyboard=True,
-        input_field_placeholder='Выберите вариант',
-    )
-
-
-
-def restart_keyboard() -> InlineKeyboardMarkup:
+def cancel_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text='Оставить ещё одну заявку', callback_data='start_form'))
+    builder.button(text="Отменить заявку", callback_data="cancel_form")
     return builder.as_markup()
