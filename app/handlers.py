@@ -8,7 +8,6 @@ from aiogram.types import CallbackQuery, Message
 
 from app.config import settings
 from app.keyboards import (
-    bot_types,
     budgets,
     contact_methods,
     current_problems,
@@ -19,10 +18,6 @@ from app.keyboards import (
     lead_sources,
     main_goals,
     make_choice_keyboard,
-    needs_help_options,
-    requests_volumes,
-    website_options,
-    weak_bot_options,
 )
 from app.states import LeadForm
 
@@ -32,85 +27,59 @@ QUESTIONS: list[dict[str, Any]] = [
     {
         "state": LeadForm.business_type,
         "key": "business_type",
-        "question": "1/12. Чем вы занимаетесь?",
+        "question": "1/9. Чем вы занимаетесь?",
         "options": final_business_types,
         "prefix": "business_type",
     },
     {
         "state": LeadForm.lead_source,
         "key": "lead_source",
-        "question": "2/12. Откуда вам чаще всего пишут клиенты?",
+        "question": "2/9. Откуда вам чаще всего пишут клиенты?",
         "options": lead_sources,
         "prefix": "lead_source",
     },
     {
         "state": LeadForm.current_problem,
         "key": "current_problem",
-        "question": "3/12. Что сейчас происходит с заявками?",
+        "question": "3/9. Что сейчас происходит с заявками?",
         "options": current_problems,
         "prefix": "current_problem",
     },
     {
         "state": LeadForm.main_goal,
         "key": "main_goal",
-        "question": "4/12. Что вам важнее всего?",
+        "question": "4/9. Что вам важнее всего?",
         "options": main_goals,
         "prefix": "main_goal",
     },
     {
-        "state": LeadForm.bot_type,
-        "key": "bot_type",
-        "question": "5/12. Какой бот вам ближе?",
-        "options": bot_types,
-        "prefix": "bot_type",
-    },
-    {
-        "state": LeadForm.requests_volume,
-        "key": "requests_volume",
-        "question": "6/12. Сколько у вас примерно обращений?",
-        "options": requests_volumes,
-        "prefix": "requests_volume",
-    },
-    {
-        "state": LeadForm.has_website,
-        "key": "has_website",
-        "question": "7/12. Есть ли у вас сайт?",
-        "options": website_options,
-        "prefix": "has_website",
-    },
-    {
         "state": LeadForm.integration_need,
         "key": "integration_need",
-        "question": "8/12. Нужна ли интеграция с менеджером или CRM?",
+        "question": "5/9. Нужна ли интеграция с менеджером или CRM?",
         "options": integration_needs,
         "prefix": "integration_need",
     },
     {
         "state": LeadForm.launch_time,
         "key": "launch_time",
-        "question": "9/12. Когда хотите запустить?",
+        "question": "6/9. Когда хотите запустить?",
         "options": launch_times,
         "prefix": "launch_time",
     },
     {
         "state": LeadForm.budget,
         "key": "budget",
-        "question": "10/12. Какой бюджет рассматриваете?",
+        "question": "7/9. Какой бюджет рассматриваете?",
         "options": budgets,
         "prefix": "budget",
     },
 ]
-
-STATE_ORDER = [item["state"] for item in QUESTIONS] + [LeadForm.task_description, LeadForm.contact_method, LeadForm.manual_contact]
 
 FIELD_TITLES = {
     "business_type": "Ниша",
     "lead_source": "Источник заявок",
     "current_problem": "Текущая ситуация",
     "main_goal": "Главная задача",
-    "bot_type": "Какой бот нужен",
-    "requests_volume": "Объем обращений",
-    "has_website": "Наличие сайта",
     "integration_need": "Интеграция / CRM",
     "launch_time": "Срок запуска",
     "budget": "Бюджет",
@@ -133,7 +102,11 @@ async def show_start(message: Message) -> None:
     builder.adjust(1)
 
     if settings.cover_file_id:
-        await message.answer_photo(photo=settings.cover_file_id, caption=text, reply_markup=builder.as_markup())
+        await message.answer_photo(
+            photo=settings.cover_file_id,
+            caption=text,
+            reply_markup=builder.as_markup(),
+        )
     else:
         await message.answer(text, reply_markup=builder.as_markup())
 
@@ -179,7 +152,7 @@ def find_question_by_prefix(prefix: str) -> dict[str, Any] | None:
     return None
 
 
-@router.callback_query(F.data.startswith("nav:back"))
+@router.callback_query(F.data == "nav:back")
 async def go_back(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     history = data.get("history", [])
@@ -192,14 +165,14 @@ async def go_back(callback: CallbackQuery, state: FSMContext) -> None:
 
     if current_state == LeadForm.contact_method.state:
         await state.set_state(LeadForm.task_description)
-        await callback.message.edit_text("11/12. Коротко опишите, что бот должен делать")
+        await callback.message.edit_text("8/9. Коротко опишите, что бот должен делать")
         await callback.answer()
         return
 
     if current_state == LeadForm.manual_contact.state:
         await state.set_state(LeadForm.contact_method)
         await callback.message.edit_text(
-            "12/12. Как удобно с вами связаться?",
+            "9/9. Как удобно с вами связаться?",
             reply_markup=make_choice_keyboard("contact_method", contact_methods, back=True),
         )
         await callback.answer()
@@ -210,10 +183,23 @@ async def go_back(callback: CallbackQuery, state: FSMContext) -> None:
         previous_index = history.pop()
         await state.update_data(history=history)
         await ask_question(callback.message, state, previous_index, edit=True)
+
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith(("business_type:", "lead_source:", "current_problem:", "main_goal:", "bot_type:", "requests_volume:", "has_website:", "integration_need:", "launch_time:", "budget:")))
+@router.callback_query(
+    F.data.startswith(
+        (
+            "business_type:",
+            "lead_source:",
+            "current_problem:",
+            "main_goal:",
+            "integration_need:",
+            "launch_time:",
+            "budget:",
+        )
+    )
+)
 async def process_choice(callback: CallbackQuery, state: FSMContext) -> None:
     prefix, raw_index = callback.data.split(":", 1)
     item = find_question_by_prefix(prefix)
@@ -231,7 +217,7 @@ async def process_choice(callback: CallbackQuery, state: FSMContext) -> None:
         await ask_question(callback.message, state, current_index + 1, edit=True)
     else:
         await state.set_state(LeadForm.task_description)
-        await callback.message.edit_text("11/12. Коротко опишите, что бот должен делать")
+        await callback.message.edit_text("8/9. Коротко опишите, что бот должен делать")
 
     await callback.answer()
 
@@ -246,7 +232,7 @@ async def process_task_description(message: Message, state: FSMContext) -> None:
     await state.update_data(task_description=text)
     await state.set_state(LeadForm.contact_method)
     await message.answer(
-        "12/12. Как удобно с вами связаться?",
+        "9/9. Как удобно с вами связаться?",
         reply_markup=make_choice_keyboard("contact_method", contact_methods, back=True),
     )
 
@@ -270,7 +256,9 @@ async def process_contact_method(callback: CallbackQuery, state: FSMContext) -> 
         return
 
     await state.set_state(LeadForm.manual_contact)
-    await callback.message.edit_text("Напишите ваш username, Telegram-ссылку или другой удобный контакт одним сообщением")
+    await callback.message.edit_text(
+        "Напишите ваш username, Telegram-ссылку или другой удобный контакт одним сообщением"
+    )
     await callback.answer()
 
 
@@ -301,9 +289,6 @@ async def finalize_application(message: Message, state: FSMContext, contact: str
         f"<b>{FIELD_TITLES['lead_source']}:</b> {data.get('lead_source', '-')}\n"
         f"<b>{FIELD_TITLES['current_problem']}:</b> {data.get('current_problem', '-')}\n"
         f"<b>{FIELD_TITLES['main_goal']}:</b> {data.get('main_goal', '-')}\n"
-        f"<b>{FIELD_TITLES['bot_type']}:</b> {data.get('bot_type', '-')}\n"
-        f"<b>{FIELD_TITLES['requests_volume']}:</b> {data.get('requests_volume', '-')}\n"
-        f"<b>{FIELD_TITLES['has_website']}:</b> {data.get('has_website', '-')}\n"
         f"<b>{FIELD_TITLES['integration_need']}:</b> {data.get('integration_need', '-')}\n"
         f"<b>{FIELD_TITLES['launch_time']}:</b> {data.get('launch_time', '-')}\n"
         f"<b>{FIELD_TITLES['budget']}:</b> {data.get('budget', '-')}\n\n"
