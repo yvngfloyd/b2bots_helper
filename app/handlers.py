@@ -300,8 +300,8 @@ async def finalize_application(message: Message, state: FSMContext, contact: str
     await state.clear()
 
     thanks_text = (
-        "<b>Спасибо, заявка отправлена</b>\n\n"
-        "Я уже получил ваши ответы. Ниже можете перейти на сайт или в Telegram-канал"
+        "<b>Спасибо, заявка отправлена!</b>\n\n"
+        "В скором времени свяжемся с вами"
     )
     await message.answer(
         thanks_text,
