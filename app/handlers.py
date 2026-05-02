@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import logging
+from html import escape
 from typing import Any
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, User
 
 from app.config import settings
 from app.keyboards import (
@@ -20,8 +22,10 @@ from app.keyboards import (
     make_choice_keyboard,
 )
 from app.states import LeadForm
+from app.storage import mark_completed, upsert_started_user
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 QUESTIONS: list[dict[str, Any]] = [
     {
@@ -114,6 +118,14 @@ async def show_start(message: Message) -> None:
 @router.message(F.text == "/start")
 async def cmd_start(message: Message, state: FSMContext) -> None:
     await state.clear()
+    if message.from_user:
+        upsert_started_user(
+            settings.database_path,
+            message.from_user.id,
+            message.from_user.full_name,
+            message.from_user.username,
+        )
+        await notify_owner_about_start(message, message.from_user)
     await show_start(message)
 
 
@@ -297,6 +309,8 @@ async def finalize_application(message: Message, state: FSMContext, contact: str
     )
 
     await message.bot.send_message(settings.owner_chat_id, lead_text)
+    if message.from_user:
+        mark_completed(settings.database_path, message.from_user.id)
     await state.clear()
 
     thanks_text = (
@@ -322,3 +336,17 @@ async def fallback_message(message: Message, state: FSMContext) -> None:
         return
 
     await message.answer("Используйте кнопки или завершите текущий шаг")
+
+
+async def notify_owner_about_start(message: Message, user: User) -> None:
+    username = f"@{user.username}" if user.username else "не указан"
+    text = (
+        "<b>Пользователь нажал /start</b>\n\n"
+        f"<b>Имя в Telegram:</b> {escape(user.full_name)}\n"
+        f"<b>Username:</b> {escape(username)}\n"
+        f"<b>User ID:</b> <code>{user.id}</code>"
+    )
+    try:
+        await message.bot.send_message(settings.owner_chat_id, text)
+    except Exception:
+        logger.exception("Failed to notify owner about /start from user_id=%s", user.id)

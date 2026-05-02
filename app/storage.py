@@ -1,0 +1,189 @@
+from __future__ import annotations
+
+import sqlite3
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+
+@dataclass(frozen=True)
+class ReminderUser:
+    user_id: int
+    full_name: str
+    username: str
+    reminder_count: int
+
+
+def initialize_database(database_path: str) -> None:
+    path = Path(database_path)
+    if path.parent != Path("."):
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+    with _connect(database_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                full_name TEXT NOT NULL,
+                username TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT,
+                first_reminder_sent_at TEXT,
+                last_reminder_sent_at TEXT,
+                reminder_count INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+
+
+def upsert_started_user(
+    database_path: str,
+    user_id: int,
+    full_name: str,
+    username: str | None,
+    now: datetime | None = None,
+) -> None:
+    current_time = _to_utc(now)
+    existing = _get_user(database_path, user_id)
+    username_value = username or ""
+
+    with _connect(database_path) as connection:
+        if existing is None or existing["completed_at"] is not None:
+            connection.execute(
+                """
+                INSERT INTO users (
+                    user_id,
+                    full_name,
+                    username,
+                    started_at,
+                    updated_at,
+                    completed_at,
+                    first_reminder_sent_at,
+                    last_reminder_sent_at,
+                    reminder_count
+                )
+                VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, 0)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    full_name = excluded.full_name,
+                    username = excluded.username,
+                    started_at = excluded.started_at,
+                    updated_at = excluded.updated_at,
+                    completed_at = NULL,
+                    first_reminder_sent_at = NULL,
+                    last_reminder_sent_at = NULL,
+                    reminder_count = 0
+                """,
+                (
+                    user_id,
+                    full_name,
+                    username_value,
+                    _serialize(current_time),
+                    _serialize(current_time),
+                ),
+            )
+            return
+
+        connection.execute(
+            """
+            UPDATE users
+            SET full_name = ?, username = ?, updated_at = ?
+            WHERE user_id = ?
+            """,
+            (full_name, username_value, _serialize(current_time), user_id),
+        )
+
+
+def mark_completed(database_path: str, user_id: int, now: datetime | None = None) -> None:
+    current_time = _to_utc(now)
+    with _connect(database_path) as connection:
+        connection.execute(
+            """
+            UPDATE users
+            SET completed_at = ?, updated_at = ?
+            WHERE user_id = ?
+            """,
+            (_serialize(current_time), _serialize(current_time), user_id),
+        )
+
+
+def get_due_reminders(
+    database_path: str,
+    now: datetime | None = None,
+    *,
+    first_delay: timedelta,
+    repeat_delay: timedelta,
+) -> list[ReminderUser]:
+    current_time = _to_utc(now)
+    first_threshold = current_time - first_delay
+    repeat_threshold = current_time - repeat_delay
+
+    with _connect(database_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT user_id, full_name, username, reminder_count
+            FROM users
+            WHERE completed_at IS NULL
+              AND (
+                (first_reminder_sent_at IS NULL AND started_at <= ?)
+                OR
+                (first_reminder_sent_at IS NOT NULL AND last_reminder_sent_at <= ?)
+              )
+            ORDER BY started_at ASC
+            """,
+            (_serialize(first_threshold), _serialize(repeat_threshold)),
+        ).fetchall()
+
+    return [
+        ReminderUser(
+            user_id=int(row["user_id"]),
+            full_name=str(row["full_name"]),
+            username=str(row["username"]),
+            reminder_count=int(row["reminder_count"]),
+        )
+        for row in rows
+    ]
+
+
+def mark_reminder_sent(database_path: str, user_id: int, now: datetime | None = None) -> None:
+    current_time = _to_utc(now)
+    timestamp = _serialize(current_time)
+    with _connect(database_path) as connection:
+        connection.execute(
+            """
+            UPDATE users
+            SET
+                first_reminder_sent_at = COALESCE(first_reminder_sent_at, ?),
+                last_reminder_sent_at = ?,
+                reminder_count = reminder_count + 1,
+                updated_at = ?
+            WHERE user_id = ?
+            """,
+            (timestamp, timestamp, timestamp, user_id),
+        )
+
+
+def _connect(database_path: str) -> sqlite3.Connection:
+    connection = sqlite3.connect(database_path)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def _get_user(database_path: str, user_id: int) -> sqlite3.Row | None:
+    with _connect(database_path) as connection:
+        return connection.execute(
+            "SELECT completed_at FROM users WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+
+
+def _to_utc(value: datetime | None) -> datetime:
+    if value is None:
+        return datetime.now(timezone.utc)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _serialize(value: datetime) -> str:
+    return _to_utc(value).isoformat(timespec="seconds")
