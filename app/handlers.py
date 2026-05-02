@@ -22,7 +22,7 @@ from app.keyboards import (
     make_choice_keyboard,
 )
 from app.states import LeadForm
-from app.storage import mark_completed, upsert_started_user
+from app.storage import get_form_snapshot, mark_completed, save_form_snapshot, upsert_started_user
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -134,11 +134,38 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
 async def start_form(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await state.update_data(history=[])
-    await ask_question(callback.message, state, 0, edit=True)
+    await ask_question(
+        callback.message,
+        state,
+        0,
+        edit=_can_edit_text(callback.message),
+        user_id=callback.from_user.id,
+    )
     await callback.answer()
 
 
-async def ask_question(message: Message, state: FSMContext, index: int, edit: bool = False) -> None:
+@router.callback_query(F.data == "reminder:continue")
+async def continue_form(callback: CallbackQuery, state: FSMContext) -> None:
+    snapshot = get_form_snapshot(settings.database_path, callback.from_user.id)
+    if snapshot is None:
+        await state.clear()
+        await state.update_data(history=[])
+        await ask_question(callback.message, state, 0, user_id=callback.from_user.id)
+        await callback.answer("Начнем заявку заново")
+        return
+
+    await state.set_data(snapshot.form_data)
+    await show_saved_step(callback.message, state, snapshot.current_step, callback.from_user.id)
+    await callback.answer()
+
+
+async def ask_question(
+    message: Message,
+    state: FSMContext,
+    index: int,
+    edit: bool = False,
+    user_id: int | None = None,
+) -> None:
     item = QUESTIONS[index]
     await state.set_state(item["state"])
 
@@ -147,6 +174,8 @@ async def ask_question(message: Message, state: FSMContext, index: int, edit: bo
     if not history or history[-1] != index:
         history.append(index)
         await state.update_data(history=history)
+
+    await save_current_form_snapshot(message, state, item["prefix"], user_id=user_id)
 
     text = item["question"]
     markup = make_choice_keyboard(item["prefix"], item["options"], back=index > 0)
@@ -171,18 +200,36 @@ async def go_back(callback: CallbackQuery, state: FSMContext) -> None:
 
     current_state = await state.get_state()
     if current_state == LeadForm.task_description.state:
-        await ask_question(callback.message, state, len(QUESTIONS) - 1, edit=True)
+        await ask_question(
+            callback.message,
+            state,
+            len(QUESTIONS) - 1,
+            edit=_can_edit_text(callback.message),
+            user_id=callback.from_user.id,
+        )
         await callback.answer()
         return
 
     if current_state == LeadForm.contact_method.state:
         await state.set_state(LeadForm.task_description)
+        await save_current_form_snapshot(
+            callback.message,
+            state,
+            "task_description",
+            user_id=callback.from_user.id,
+        )
         await callback.message.edit_text("8/9. Коротко опишите, что бот должен делать")
         await callback.answer()
         return
 
     if current_state == LeadForm.manual_contact.state:
         await state.set_state(LeadForm.contact_method)
+        await save_current_form_snapshot(
+            callback.message,
+            state,
+            "contact_method",
+            user_id=callback.from_user.id,
+        )
         await callback.message.edit_text(
             "9/9. Как удобно с вами связаться?",
             reply_markup=make_choice_keyboard("contact_method", contact_methods, back=True),
@@ -194,7 +241,13 @@ async def go_back(callback: CallbackQuery, state: FSMContext) -> None:
         history.pop()
         previous_index = history.pop()
         await state.update_data(history=history)
-        await ask_question(callback.message, state, previous_index, edit=True)
+        await ask_question(
+            callback.message,
+            state,
+            previous_index,
+            edit=_can_edit_text(callback.message),
+            user_id=callback.from_user.id,
+        )
 
     await callback.answer()
 
@@ -226,9 +279,21 @@ async def process_choice(callback: CallbackQuery, state: FSMContext) -> None:
     current_index = next(i for i, q in enumerate(QUESTIONS) if q["prefix"] == prefix)
 
     if current_index < len(QUESTIONS) - 1:
-        await ask_question(callback.message, state, current_index + 1, edit=True)
+        await ask_question(
+            callback.message,
+            state,
+            current_index + 1,
+            edit=_can_edit_text(callback.message),
+            user_id=callback.from_user.id,
+        )
     else:
         await state.set_state(LeadForm.task_description)
+        await save_current_form_snapshot(
+            callback.message,
+            state,
+            "task_description",
+            user_id=callback.from_user.id,
+        )
         await callback.message.edit_text("8/9. Коротко опишите, что бот должен делать")
 
     await callback.answer()
@@ -243,6 +308,7 @@ async def process_task_description(message: Message, state: FSMContext) -> None:
 
     await state.update_data(task_description=text)
     await state.set_state(LeadForm.contact_method)
+    await save_current_form_snapshot(message, state, "contact_method")
     await message.answer(
         "9/9. Как удобно с вами связаться?",
         reply_markup=make_choice_keyboard("contact_method", contact_methods, back=True),
@@ -263,11 +329,23 @@ async def process_contact_method(callback: CallbackQuery, state: FSMContext) -> 
 
     if answer == "Написать телефон вручную":
         await state.set_state(LeadForm.manual_contact)
+        await save_current_form_snapshot(
+            callback.message,
+            state,
+            "manual_contact",
+            user_id=callback.from_user.id,
+        )
         await callback.message.edit_text("Напишите ваш телефон одним сообщением")
         await callback.answer()
         return
 
     await state.set_state(LeadForm.manual_contact)
+    await save_current_form_snapshot(
+        callback.message,
+        state,
+        "manual_contact",
+        user_id=callback.from_user.id,
+    )
     await callback.message.edit_text(
         "Напишите ваш username, Telegram-ссылку или другой удобный контакт одним сообщением"
     )
@@ -350,3 +428,67 @@ async def notify_owner_about_start(message: Message, user: User) -> None:
         await message.bot.send_message(settings.owner_chat_id, text)
     except Exception:
         logger.exception("Failed to notify owner about /start from user_id=%s", user.id)
+
+
+async def show_saved_step(message: Message, state: FSMContext, current_step: str, user_id: int) -> None:
+    question_index = find_question_index_by_prefix(current_step)
+    if question_index is not None:
+        await ask_question(message, state, question_index, user_id=user_id)
+        return
+
+    if current_step == "task_description":
+        await state.set_state(LeadForm.task_description)
+        await save_current_form_snapshot(message, state, "task_description", user_id=user_id)
+        await message.answer("8/9. Коротко опишите, что бот должен делать")
+        return
+
+    if current_step == "contact_method":
+        await state.set_state(LeadForm.contact_method)
+        await save_current_form_snapshot(message, state, "contact_method", user_id=user_id)
+        await message.answer(
+            "9/9. Как удобно с вами связаться?",
+            reply_markup=make_choice_keyboard("contact_method", contact_methods, back=True),
+        )
+        return
+
+    if current_step == "manual_contact":
+        await state.set_state(LeadForm.manual_contact)
+        await save_current_form_snapshot(message, state, "manual_contact", user_id=user_id)
+        await message.answer("Напишите ваш username, Telegram-ссылку или другой удобный контакт одним сообщением")
+        return
+
+    await state.clear()
+    await state.update_data(history=[])
+    await ask_question(message, state, 0, user_id=user_id)
+
+
+async def save_current_form_snapshot(
+    message: Message,
+    state: FSMContext,
+    current_step: str,
+    *,
+    user_id: int | None = None,
+) -> None:
+    resolved_user_id = user_id
+    if resolved_user_id is None and message.from_user:
+        resolved_user_id = message.from_user.id
+    if resolved_user_id is None:
+        return
+
+    save_form_snapshot(
+        settings.database_path,
+        resolved_user_id,
+        current_step=current_step,
+        form_data=await state.get_data(),
+    )
+
+
+def find_question_index_by_prefix(prefix: str) -> int | None:
+    for index, item in enumerate(QUESTIONS):
+        if item["prefix"] == prefix:
+            return index
+    return None
+
+
+def _can_edit_text(message: Message | None) -> bool:
+    return bool(message and not message.photo)

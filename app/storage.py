@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -12,6 +14,12 @@ class ReminderUser:
     full_name: str
     username: str
     reminder_count: int
+
+
+@dataclass(frozen=True)
+class FormSnapshot:
+    current_step: str
+    form_data: dict[str, Any]
 
 
 def initialize_database(database_path: str) -> None:
@@ -31,10 +39,14 @@ def initialize_database(database_path: str) -> None:
                 completed_at TEXT,
                 first_reminder_sent_at TEXT,
                 last_reminder_sent_at TEXT,
-                reminder_count INTEGER NOT NULL DEFAULT 0
+                reminder_count INTEGER NOT NULL DEFAULT 0,
+                current_step TEXT,
+                form_data_json TEXT
             )
             """
         )
+        _ensure_column(connection, "users", "current_step", "TEXT")
+        _ensure_column(connection, "users", "form_data_json", "TEXT")
 
 
 def upsert_started_user(
@@ -72,7 +84,9 @@ def upsert_started_user(
                     completed_at = NULL,
                     first_reminder_sent_at = NULL,
                     last_reminder_sent_at = NULL,
-                    reminder_count = 0
+                    reminder_count = 0,
+                    current_step = NULL,
+                    form_data_json = NULL
                 """,
                 (
                     user_id,
@@ -100,7 +114,7 @@ def mark_completed(database_path: str, user_id: int, now: datetime | None = None
         connection.execute(
             """
             UPDATE users
-            SET completed_at = ?, updated_at = ?
+            SET completed_at = ?, updated_at = ?, current_step = NULL, form_data_json = NULL
             WHERE user_id = ?
             """,
             (_serialize(current_time), _serialize(current_time), user_id),
@@ -163,10 +177,69 @@ def mark_reminder_sent(database_path: str, user_id: int, now: datetime | None = 
         )
 
 
+def save_form_snapshot(
+    database_path: str,
+    user_id: int,
+    *,
+    current_step: str,
+    form_data: dict[str, Any],
+    now: datetime | None = None,
+) -> None:
+    current_time = _to_utc(now)
+    with _connect(database_path) as connection:
+        connection.execute(
+            """
+            UPDATE users
+            SET current_step = ?, form_data_json = ?, updated_at = ?
+            WHERE user_id = ? AND completed_at IS NULL
+            """,
+            (
+                current_step,
+                json.dumps(form_data, ensure_ascii=False),
+                _serialize(current_time),
+                user_id,
+            ),
+        )
+
+
+def get_form_snapshot(database_path: str, user_id: int) -> FormSnapshot | None:
+    with _connect(database_path) as connection:
+        row = connection.execute(
+            """
+            SELECT current_step, form_data_json
+            FROM users
+            WHERE user_id = ? AND completed_at IS NULL
+            """,
+            (user_id,),
+        ).fetchone()
+
+    if row is None or row["current_step"] is None or row["form_data_json"] is None:
+        return None
+
+    return FormSnapshot(
+        current_step=str(row["current_step"]),
+        form_data=json.loads(str(row["form_data_json"])),
+    )
+
+
 def _connect(database_path: str) -> sqlite3.Connection:
     connection = sqlite3.connect(database_path)
     connection.row_factory = sqlite3.Row
     return connection
+
+
+def _ensure_column(
+    connection: sqlite3.Connection,
+    table_name: str,
+    column_name: str,
+    column_definition: str,
+) -> None:
+    columns = {
+        row["name"]
+        for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    if column_name not in columns:
+        connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}")
 
 
 def _get_user(database_path: str, user_id: int) -> sqlite3.Row | None:
