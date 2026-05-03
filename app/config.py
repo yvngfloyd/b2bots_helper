@@ -13,6 +13,7 @@ class Settings:
     owner_chat_id: int
     site_url: str
     tg_channel_url: str
+    subscription_channel_id: str = ""
     cover_file_id: str = ""
     database_path: str = "bot_data.sqlite3"
     first_reminder_hours: int = 1
@@ -32,6 +33,7 @@ settings = Settings(
     owner_chat_id=int(_get_required_env("OWNER_CHAT_ID")),
     site_url=os.getenv("SITE_URL", "").strip() or "https://example.com",
     tg_channel_url=os.getenv("TG_CHANNEL_URL", "").strip() or "https://t.me/example",
+    subscription_channel_id=os.getenv("SUBSCRIPTION_CHANNEL_ID", "").strip(),
     cover_file_id=os.getenv("COVER_FILE_ID", "").strip(),
     database_path=os.getenv("DATABASE_PATH", "").strip() or "bot_data.sqlite3",
     first_reminder_hours=int(os.getenv("FIRST_REMINDER_HOURS", "1")),

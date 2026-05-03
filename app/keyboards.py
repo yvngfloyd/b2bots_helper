@@ -84,3 +84,11 @@ def final_links_keyboard(site_url: str, tg_channel_url: str) -> InlineKeyboardMa
     builder.button(text="Оставить новую заявку", callback_data="form:restart")
     builder.adjust(1)
     return builder.as_markup()
+
+
+def subscription_required_keyboard(channel_url: str, check_callback_data: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Подписаться на канал", url=channel_url)
+    builder.button(text="Проверить подписку", callback_data=check_callback_data)
+    builder.adjust(1)
+    return builder.as_markup()

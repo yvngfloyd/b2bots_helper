@@ -20,9 +20,11 @@ from app.keyboards import (
     lead_sources,
     main_goals,
     make_choice_keyboard,
+    subscription_required_keyboard,
 )
 from app.states import LeadForm
 from app.storage import get_form_snapshot, mark_completed, save_form_snapshot, upsert_started_user
+from app.subscription import is_user_subscribed, resolve_subscription_chat_id
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -94,15 +96,15 @@ FIELD_TITLES = {
 
 async def show_start(message: Message) -> None:
     text = (
-        "<b>B2Bots Helper</b>\n\n"
-        "Помогу быстро помочь с подбором сценария для решения ваших задач!\n\n"
-        "Нажмите кнопку ниже и ответьте на несколько коротких вопросов"
+        "<b>Бесплатная консультация B2Bots</b>\n\n"
+        "Хотите получить бесплатную консультацию, чтобы понять, какой бот или автоматизация вам нужна?\n\n"
+        "Нажмите кнопку ниже, подпишитесь на канал и ответьте на несколько коротких вопросов"
     )
 
     from aiogram.utils.keyboard import InlineKeyboardBuilder
 
     builder = InlineKeyboardBuilder()
-    builder.button(text="Оставить заявку", callback_data="form:start")
+    builder.button(text="Пройти консультацию", callback_data="form:start")
     builder.adjust(1)
 
     if settings.cover_file_id:
@@ -132,6 +134,29 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
 @router.callback_query(F.data == "form:start")
 @router.callback_query(F.data == "form:restart")
 async def start_form(callback: CallbackQuery, state: FSMContext) -> None:
+    if not await ensure_subscription(callback, "start"):
+        return
+    await begin_form(callback, state)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "subscription:check:start")
+async def check_subscription_for_start(callback: CallbackQuery, state: FSMContext) -> None:
+    if not await ensure_subscription(callback, "start"):
+        return
+    await begin_form(callback, state)
+    await callback.answer("Подписка подтверждена")
+
+
+@router.callback_query(F.data == "subscription:check:continue")
+async def check_subscription_for_continue(callback: CallbackQuery, state: FSMContext) -> None:
+    if not await ensure_subscription(callback, "continue"):
+        return
+    resumed = await resume_saved_form(callback, state)
+    await callback.answer("Подписка подтверждена" if resumed else "Начнем заявку заново")
+
+
+async def begin_form(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await state.update_data(history=[])
     await ask_question(
@@ -141,22 +166,60 @@ async def start_form(callback: CallbackQuery, state: FSMContext) -> None:
         edit=_can_edit_text(callback.message),
         user_id=callback.from_user.id,
     )
-    await callback.answer()
-
 
 @router.callback_query(F.data == "reminder:continue")
 async def continue_form(callback: CallbackQuery, state: FSMContext) -> None:
+    if not await ensure_subscription(callback, "continue"):
+        return
+    resumed = await resume_saved_form(callback, state)
+    if resumed:
+        await callback.answer()
+    else:
+        await callback.answer("Начнем заявку заново")
+
+
+async def resume_saved_form(callback: CallbackQuery, state: FSMContext) -> bool:
     snapshot = get_form_snapshot(settings.database_path, callback.from_user.id)
     if snapshot is None:
         await state.clear()
         await state.update_data(history=[])
         await ask_question(callback.message, state, 0, user_id=callback.from_user.id)
-        await callback.answer("Начнем заявку заново")
-        return
+        return False
 
     await state.set_data(snapshot.form_data)
     await show_saved_step(callback.message, state, snapshot.current_step, callback.from_user.id)
-    await callback.answer()
+    return True
+
+
+async def ensure_subscription(callback: CallbackQuery, next_action: str) -> bool:
+    chat_id = resolve_subscription_chat_id(settings.subscription_channel_id, settings.tg_channel_url)
+    if chat_id is None:
+        logger.error(
+            "Subscription gate is enabled, but SUBSCRIPTION_CHANNEL_ID cannot be resolved from TG_CHANNEL_URL=%s",
+            settings.tg_channel_url,
+        )
+        if callback.message:
+            await callback.message.answer(
+                "Пока не получается проверить подписку на канал. Напишите нам в канал, и мы поможем продолжить.",
+                reply_markup=subscription_required_keyboard(settings.tg_channel_url, f"subscription:check:{next_action}"),
+            )
+        await callback.answer("Проверка подписки не настроена")
+        return False
+
+    if await is_user_subscribed(callback.bot, callback.from_user.id, chat_id):
+        return True
+
+    if callback.message:
+        await callback.message.answer(
+            (
+                "<b>Перед консультацией подпишитесь на канал B2Bots</b>\n\n"
+                "Там показываем примеры автоматизаций и сценарии, которые помогают не терять заявки.\n\n"
+                "После подписки нажмите «Проверить подписку», и бот сразу продолжит анкету."
+            ),
+            reply_markup=subscription_required_keyboard(settings.tg_channel_url, f"subscription:check:{next_action}"),
+        )
+    await callback.answer("Сначала подпишитесь на канал")
+    return False
 
 
 async def ask_question(
