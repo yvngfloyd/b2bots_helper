@@ -24,7 +24,7 @@ from app.keyboards import (
 )
 from app.states import LeadForm
 from app.storage import get_form_snapshot, mark_completed, save_form_snapshot, upsert_started_user
-from app.subscription import is_user_subscribed, resolve_subscription_chat_id
+from app.subscription import SubscriptionCheckStatus, check_user_subscription, resolve_subscription_chat_id
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -206,8 +206,26 @@ async def ensure_subscription(callback: CallbackQuery, next_action: str) -> bool
         await callback.answer("Проверка подписки не настроена")
         return False
 
-    if await is_user_subscribed(callback.bot, callback.from_user.id, chat_id):
+    result = await check_user_subscription(callback.bot, callback.from_user.id, chat_id)
+    if result.status == SubscriptionCheckStatus.SUBSCRIBED:
         return True
+
+    if result.status == SubscriptionCheckStatus.CHECK_FAILED:
+        await notify_owner_about_subscription_check_failure(callback, chat_id, result.error)
+        if callback.message:
+            await callback.message.answer(
+                (
+                    "<b>Не получилось проверить подписку автоматически</b>\n\n"
+                    "Скорее всего, бот не добавлен админом в канал или в настройках указан не тот канал.\n"
+                    "Я уже отправил владельцу ошибку проверки, чтобы это быстро поправили."
+                ),
+                reply_markup=subscription_required_keyboard(settings.tg_channel_url, f"subscription:check:{next_action}"),
+            )
+        await callback.answer("Проверка подписки временно не проходит")
+        return False
+
+    if callback.data and callback.data.startswith("subscription:check:"):
+        await notify_owner_about_subscription_not_found(callback, chat_id, result.member_status)
 
     if callback.message:
         await callback.message.answer(
@@ -491,6 +509,52 @@ async def notify_owner_about_start(message: Message, user: User) -> None:
         await message.bot.send_message(settings.owner_chat_id, text)
     except Exception:
         logger.exception("Failed to notify owner about /start from user_id=%s", user.id)
+
+
+async def notify_owner_about_subscription_check_failure(
+    callback: CallbackQuery,
+    chat_id: str,
+    error: str,
+) -> None:
+    user = callback.from_user
+    username = f"@{user.username}" if user.username else "не указан"
+    text = (
+        "<b>Не удалось проверить подписку на канал</b>\n\n"
+        f"<b>Канал для проверки:</b> <code>{escape(chat_id)}</code>\n"
+        f"<b>Ссылка кнопки:</b> {escape(settings.tg_channel_url)}\n"
+        f"<b>Пользователь:</b> {escape(user.full_name)}\n"
+        f"<b>Username:</b> {escape(username)}\n"
+        f"<b>User ID:</b> <code>{user.id}</code>\n\n"
+        f"<b>Ошибка Telegram:</b>\n<code>{escape(error or 'неизвестная ошибка')}</code>\n\n"
+        "Проверь, что бот добавлен админом в канал, а `SUBSCRIPTION_CHANNEL_ID` указывает на этот же канал."
+    )
+    try:
+        await callback.bot.send_message(settings.owner_chat_id, text)
+    except Exception:
+        logger.exception("Failed to notify owner about subscription check failure for user_id=%s", user.id)
+
+
+async def notify_owner_about_subscription_not_found(
+    callback: CallbackQuery,
+    chat_id: str,
+    member_status: str,
+) -> None:
+    user = callback.from_user
+    username = f"@{user.username}" if user.username else "не указан"
+    text = (
+        "<b>Пользователь нажал «Проверить подписку», но Telegram вернул неподписанный статус</b>\n\n"
+        f"<b>Канал для проверки:</b> <code>{escape(chat_id)}</code>\n"
+        f"<b>Ссылка кнопки:</b> {escape(settings.tg_channel_url)}\n"
+        f"<b>Статус Telegram:</b> <code>{escape(member_status or 'пусто')}</code>\n"
+        f"<b>Пользователь:</b> {escape(user.full_name)}\n"
+        f"<b>Username:</b> {escape(username)}\n"
+        f"<b>User ID:</b> <code>{user.id}</code>\n\n"
+        "Если пользователь точно подписан, значит бот проверяет не тот канал или Telegram не видит подписку в этом канале."
+    )
+    try:
+        await callback.bot.send_message(settings.owner_chat_id, text)
+    except Exception:
+        logger.exception("Failed to notify owner about missing subscription for user_id=%s", user.id)
 
 
 async def show_saved_step(message: Message, state: FSMContext, current_step: str, user_id: int) -> None:

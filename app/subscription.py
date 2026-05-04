@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 from urllib.parse import urlparse
 
@@ -9,6 +11,19 @@ logger = logging.getLogger(__name__)
 
 SUBSCRIBED_STATUSES = {"member", "administrator", "creator"}
 PRIVATE_TME_PATHS = {"joinchat", "c"}
+
+
+class SubscriptionCheckStatus(str, Enum):
+    SUBSCRIBED = "subscribed"
+    NOT_SUBSCRIBED = "not_subscribed"
+    CHECK_FAILED = "check_failed"
+
+
+@dataclass(frozen=True)
+class SubscriptionCheckResult:
+    status: SubscriptionCheckStatus
+    member_status: str = ""
+    error: str = ""
 
 
 def resolve_subscription_chat_id(explicit_channel_id: str, channel_url: str) -> str | None:
@@ -58,9 +73,27 @@ def is_subscribed_status(status: Any) -> bool:
 
 
 async def is_user_subscribed(bot: Any, user_id: int, chat_id: str) -> bool:
+    result = await check_user_subscription(bot, user_id, chat_id)
+    return result.status == SubscriptionCheckStatus.SUBSCRIBED
+
+
+async def check_user_subscription(bot: Any, user_id: int, chat_id: str) -> SubscriptionCheckResult:
     try:
         member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
-    except Exception:
+    except Exception as error:
         logger.exception("Failed to check subscription for user_id=%s chat_id=%s", user_id, chat_id)
-        return False
-    return is_subscribed_status(member.status)
+        return SubscriptionCheckResult(
+            status=SubscriptionCheckStatus.CHECK_FAILED,
+            error=str(error),
+        )
+
+    member_status = getattr(member.status, "value", member.status)
+    if is_subscribed_status(member.status):
+        return SubscriptionCheckResult(
+            status=SubscriptionCheckStatus.SUBSCRIBED,
+            member_status=str(member_status),
+        )
+    return SubscriptionCheckResult(
+        status=SubscriptionCheckStatus.NOT_SUBSCRIBED,
+        member_status=str(member_status),
+    )

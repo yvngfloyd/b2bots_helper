@@ -7,7 +7,12 @@ os.environ.setdefault("BOT_TOKEN", "123:abc")
 os.environ.setdefault("OWNER_CHAT_ID", "123456")
 
 from app.keyboards import subscription_required_keyboard
-from app.subscription import is_subscribed_status, resolve_subscription_chat_id
+from app.subscription import (
+    SubscriptionCheckStatus,
+    check_user_subscription,
+    is_subscribed_status,
+    resolve_subscription_chat_id,
+)
 
 
 class SubscriptionGateTests(unittest.TestCase):
@@ -40,6 +45,48 @@ class SubscriptionGateTests(unittest.TestCase):
         self.assertEqual(rows[0][0].url, "https://t.me/b2bots")
         self.assertEqual(rows[1][0].text, "Проверить подписку")
         self.assertEqual(rows[1][0].callback_data, "subscription:check:start")
+
+
+class SubscriptionCheckTests(unittest.IsolatedAsyncioTestCase):
+    async def test_member_status_returns_subscribed(self) -> None:
+        result = await check_user_subscription(FakeBot("member"), 101, "@b2bots")
+
+        self.assertEqual(result.status, SubscriptionCheckStatus.SUBSCRIBED)
+        self.assertEqual(result.member_status, "member")
+
+    async def test_left_status_returns_not_subscribed(self) -> None:
+        result = await check_user_subscription(FakeBot("left"), 101, "@b2bots")
+
+        self.assertEqual(result.status, SubscriptionCheckStatus.NOT_SUBSCRIBED)
+        self.assertEqual(result.member_status, "left")
+
+    async def test_api_error_returns_check_failed_not_not_subscribed(self) -> None:
+        with self.assertLogs("app.subscription", level="ERROR"):
+            result = await check_user_subscription(FailingBot(RuntimeError("chat not found")), 101, "@b2bots")
+
+        self.assertEqual(result.status, SubscriptionCheckStatus.CHECK_FAILED)
+        self.assertIn("chat not found", result.error)
+
+
+class FakeMember:
+    def __init__(self, status: str) -> None:
+        self.status = status
+
+
+class FakeBot:
+    def __init__(self, status: str) -> None:
+        self.status = status
+
+    async def get_chat_member(self, chat_id: str, user_id: int) -> FakeMember:
+        return FakeMember(self.status)
+
+
+class FailingBot:
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    async def get_chat_member(self, chat_id: str, user_id: int) -> FakeMember:
+        raise self.error
 
 
 if __name__ == "__main__":
