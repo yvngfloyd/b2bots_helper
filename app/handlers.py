@@ -404,7 +404,7 @@ async def process_contact_method(callback: CallbackQuery, state: FSMContext) -> 
     if answer == "Подставить мой username":
         username = callback.from_user.username
         contact = f"@{username}" if username else "Username не указан"
-        await finalize_application(callback.message, state, contact)
+        await finalize_application(callback.message, state, contact, user=callback.from_user)
         await callback.answer()
         return
 
@@ -443,13 +443,14 @@ async def process_manual_contact(message: Message, state: FSMContext) -> None:
     await finalize_application(message, state, contact)
 
 
-async def finalize_application(message: Message, state: FSMContext, contact: str) -> None:
+async def finalize_application(message: Message, state: FSMContext, contact: str, user: User | None = None) -> None:
     await state.update_data(contact=contact)
     data = await state.get_data()
+    application_user = resolve_application_user(message, user)
 
-    username = f"@{message.from_user.username}" if message.from_user and message.from_user.username else "не указан"
-    full_name = message.from_user.full_name if message.from_user else "не указано"
-    user_id = message.from_user.id if message.from_user else 0
+    username = f"@{application_user.username}" if application_user and application_user.username else "не указан"
+    full_name = application_user.full_name if application_user else "не указано"
+    user_id = application_user.id if application_user else 0
 
     lead_text = (
         "<b>Новая заявка B2Bots Helper</b>\n\n"
@@ -468,8 +469,8 @@ async def finalize_application(message: Message, state: FSMContext, contact: str
     )
 
     await message.bot.send_message(settings.owner_chat_id, lead_text)
-    if message.from_user:
-        mark_completed(settings.database_path, message.from_user.id)
+    if application_user:
+        mark_completed(settings.database_path, application_user.id)
     await state.clear()
 
     thanks_text = (
@@ -480,6 +481,10 @@ async def finalize_application(message: Message, state: FSMContext, contact: str
         thanks_text,
         reply_markup=final_links_keyboard(settings.site_url, settings.tg_channel_url),
     )
+
+
+def resolve_application_user(message: Message, user: User | None = None) -> User | None:
+    return user or message.from_user
 
 
 @router.message()
