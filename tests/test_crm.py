@@ -5,7 +5,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from app.crm import load_crm_users, render_crm_html
+from app.crm import load_crm_users, render_crm_debug_html, render_crm_html
 from crm_server import is_authorized
 from app.storage import (
     initialize_database,
@@ -62,6 +62,16 @@ class CrmTests(unittest.TestCase):
         self.assertIn("&lt;Alice&gt;", html)
         self.assertIn("Всего пользователей: 1", html)
         self.assertIn("bot.sqlite3", html)
+
+    def test_render_debug_html_shows_database_path_and_latest_users(self) -> None:
+        upsert_started_user(self.database_path, 101, "Alice", "alice", self.now)
+
+        html = render_crm_debug_html(self.database_path)
+
+        self.assertIn("CRM Debug", html)
+        self.assertIn("bot.sqlite3", html)
+        self.assertIn("User rows", html)
+        self.assertIn("Alice", html)
 
 
 class CrmAuthTests(unittest.TestCase):

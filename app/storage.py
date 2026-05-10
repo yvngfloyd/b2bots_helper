@@ -256,6 +256,12 @@ def get_application_data(database_path: str, user_id: int) -> dict[str, Any] | N
     return json.loads(str(row["application_data_json"]))
 
 
+def count_users(database_path: str) -> int:
+    with _connect(database_path) as connection:
+        row = connection.execute("SELECT COUNT(*) FROM users").fetchone()
+    return int(row[0])
+
+
 def _connect(database_path: str) -> sqlite3.Connection:
     connection = sqlite3.connect(database_path)
     connection.row_factory = sqlite3.Row

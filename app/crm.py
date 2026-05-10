@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from dataclasses import dataclass
 from html import escape
@@ -235,6 +236,87 @@ def render_crm_html(users: list[CrmUser], database_path: str) -> str:
       </table>
     </div>
   </main>
+</body>
+</html>"""
+
+
+def render_crm_debug_html(database_path: str) -> str:
+    path = Path(database_path)
+    absolute_path = path.resolve()
+    exists = path.exists()
+    size = path.stat().st_size if exists else 0
+    user_count = 0
+    latest_rows: list[sqlite3.Row] = []
+    error = ""
+
+    try:
+        with _connect(database_path) as connection:
+            _ensure_application_data_column(connection)
+            user_count = int(connection.execute("SELECT COUNT(*) FROM users").fetchone()[0])
+            latest_rows = connection.execute(
+                """
+                SELECT user_id, full_name, username, started_at, updated_at, completed_at
+                FROM users
+                ORDER BY updated_at DESC, started_at DESC
+                LIMIT 10
+                """
+            ).fetchall()
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+
+    rows_html = "\n".join(
+        "<tr>"
+        f"<td><code>{escape(str(row['user_id']))}</code></td>"
+        f"<td>{escape(str(row['full_name']))}</td>"
+        f"<td>{escape(str(row['username'] or '-'))}</td>"
+        f"<td>{escape(str(row['started_at']))}</td>"
+        f"<td>{escape(str(row['updated_at']))}</td>"
+        f"<td>{escape(str(row['completed_at'] or '-'))}</td>"
+        "</tr>"
+        for row in latest_rows
+    )
+    if not rows_html:
+        rows_html = '<tr><td colspan="6">No rows in users table</td></tr>'
+
+    return f"""<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CRM Debug</title>
+  <style>
+    body {{ margin: 32px; font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #182230; }}
+    h1 {{ margin: 0 0 18px; }}
+    table {{ border-collapse: collapse; width: 100%; margin-top: 16px; }}
+    th, td {{ border: 1px solid #e4e7ec; padding: 8px 10px; text-align: left; }}
+    th {{ background: #f2f4f7; }}
+    code {{ background: #f2f4f7; padding: 2px 4px; border-radius: 4px; }}
+    .error {{ color: #b42318; }}
+  </style>
+</head>
+<body>
+  <h1>CRM Debug</h1>
+  <p><b>Database path:</b> <code>{escape(database_path)}</code></p>
+  <p><b>Absolute path:</b> <code>{escape(str(absolute_path))}</code></p>
+  <p><b>Current working directory:</b> <code>{escape(os.getcwd())}</code></p>
+  <p><b>Exists:</b> {exists}</p>
+  <p><b>Size:</b> {size} bytes</p>
+  <p><b>User rows:</b> {user_count}</p>
+  {f'<p class="error"><b>Error:</b> {escape(error)}</p>' if error else ''}
+  <h2>Latest rows</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>User ID</th>
+        <th>Name</th>
+        <th>Username</th>
+        <th>Started</th>
+        <th>Updated</th>
+        <th>Completed</th>
+      </tr>
+    </thead>
+    <tbody>{rows_html}</tbody>
+  </table>
 </body>
 </html>"""
 

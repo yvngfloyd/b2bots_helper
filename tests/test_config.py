@@ -6,7 +6,7 @@ import unittest
 os.environ.setdefault("BOT_TOKEN", "123:abc")
 os.environ.setdefault("OWNER_CHAT_ID", "123456")
 
-from app.config import parse_bool
+from app.config import parse_bool, resolve_crm_port
 
 
 class ConfigParsingTests(unittest.TestCase):
@@ -26,6 +26,12 @@ class ConfigParsingTests(unittest.TestCase):
         self.assertFalse(parse_bool(""))
         self.assertTrue(parse_bool("", default=True))
         self.assertTrue(parse_bool("later", default=True))
+
+    def test_resolve_crm_port_prefers_railway_port(self) -> None:
+        self.assertEqual(resolve_crm_port("12345", "8080"), 12345)
+
+    def test_resolve_crm_port_uses_crm_port_without_railway_port(self) -> None:
+        self.assertEqual(resolve_crm_port("", "8080"), 8080)
 
 
 if __name__ == "__main__":

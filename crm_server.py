@@ -8,7 +8,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-from app.crm import load_crm_users, render_crm_html
+from app.crm import load_crm_users, render_crm_debug_html, render_crm_html
 from app.storage import initialize_database
 
 
@@ -112,6 +112,9 @@ def make_handler(
             path = urlparse(self.path).path
             if path in {"", "/"}:
                 self._send_html(render_crm_html(load_crm_users(database_path), database_path))
+                return
+            if path == "/debug":
+                self._send_html(render_crm_debug_html(database_path))
                 return
             if path == "/health":
                 self._send_text("ok")

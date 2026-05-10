@@ -49,6 +49,13 @@ def parse_bool(value: str | None, default: bool = False) -> bool:
     return default
 
 
+def resolve_crm_port(port_env: str | None, crm_port_env: str | None, default: int = 8080) -> int:
+    value = (port_env or "").strip() or (crm_port_env or "").strip()
+    if not value:
+        return default
+    return int(value)
+
+
 settings = Settings(
     bot_token=_get_required_env("BOT_TOKEN"),
     owner_chat_id=int(_get_required_env("OWNER_CHAT_ID")),
@@ -63,7 +70,7 @@ settings = Settings(
     reminder_check_seconds=int(os.getenv("REMINDER_CHECK_SECONDS", "300")),
     crm_enabled=parse_bool(os.getenv("CRM_ENABLED"), default=False),
     crm_host=os.getenv("CRM_HOST", "").strip() or "127.0.0.1",
-    crm_port=int(os.getenv("CRM_PORT") or os.getenv("PORT") or "8080"),
+    crm_port=resolve_crm_port(os.getenv("PORT"), os.getenv("CRM_PORT")),
     crm_username=os.getenv("CRM_USERNAME", "").strip(),
     crm_password=os.getenv("CRM_PASSWORD", "").strip(),
 )

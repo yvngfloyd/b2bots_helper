@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.storage import (
+    count_users,
     get_application_data,
     get_form_snapshot,
     get_due_reminders,
@@ -27,6 +28,8 @@ class StorageReminderTests(unittest.TestCase):
 
     def test_started_user_is_due_after_first_delay(self) -> None:
         upsert_started_user(self.database_path, 101, "Alice", "alice", self.now)
+
+        self.assertEqual(count_users(self.database_path), 1)
 
         due = get_due_reminders(
             self.database_path,

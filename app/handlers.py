@@ -23,7 +23,7 @@ from app.keyboards import (
     subscription_required_keyboard,
 )
 from app.states import LeadForm
-from app.storage import get_form_snapshot, mark_completed, save_form_snapshot, upsert_started_user
+from app.storage import count_users, get_form_snapshot, mark_completed, save_form_snapshot, upsert_started_user
 from app.subscription import SubscriptionCheckStatus, check_user_subscription, resolve_subscription_chat_id
 
 router = Router()
@@ -126,6 +126,12 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
             message.from_user.id,
             message.from_user.full_name,
             message.from_user.username,
+        )
+        logger.info(
+            "Saved /start user_id=%s database_path=%s users_count=%s",
+            message.from_user.id,
+            settings.database_path,
+            count_users(settings.database_path),
         )
         await notify_owner_about_start(message, message.from_user)
     await show_start(message)
