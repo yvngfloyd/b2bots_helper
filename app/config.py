@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 
 from dotenv import load_dotenv
 
@@ -56,6 +57,18 @@ def resolve_crm_port(port_env: str | None, crm_port_env: str | None, default: in
     return int(value)
 
 
+def resolve_database_path(database_path_env: str | None, railway_volume_mount_path: str | None) -> str:
+    explicit_path = (database_path_env or "").strip()
+    volume_path = (railway_volume_mount_path or "").strip()
+    if volume_path and explicit_path in {"", "bot_data.sqlite3", "./bot_data.sqlite3"}:
+        return str(PurePosixPath(volume_path) / "bot_data.sqlite3")
+
+    if explicit_path:
+        return explicit_path
+
+    return "bot_data.sqlite3"
+
+
 settings = Settings(
     bot_token=_get_required_env("BOT_TOKEN"),
     owner_chat_id=int(_get_required_env("OWNER_CHAT_ID")),
@@ -64,7 +77,10 @@ settings = Settings(
     require_subscription=parse_bool(os.getenv("REQUIRE_SUBSCRIPTION"), default=False),
     subscription_channel_id=os.getenv("SUBSCRIPTION_CHANNEL_ID", "").strip(),
     cover_file_id=os.getenv("COVER_FILE_ID", "").strip(),
-    database_path=os.getenv("DATABASE_PATH", "").strip() or "bot_data.sqlite3",
+    database_path=resolve_database_path(
+        os.getenv("DATABASE_PATH"),
+        os.getenv("RAILWAY_VOLUME_MOUNT_PATH"),
+    ),
     first_reminder_hours=int(os.getenv("FIRST_REMINDER_HOURS", "1")),
     reminder_repeat_days=int(os.getenv("REMINDER_REPEAT_DAYS", "3")),
     reminder_check_seconds=int(os.getenv("REMINDER_CHECK_SECONDS", "300")),

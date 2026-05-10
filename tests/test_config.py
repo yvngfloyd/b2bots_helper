@@ -6,7 +6,7 @@ import unittest
 os.environ.setdefault("BOT_TOKEN", "123:abc")
 os.environ.setdefault("OWNER_CHAT_ID", "123456")
 
-from app.config import parse_bool, resolve_crm_port
+from app.config import parse_bool, resolve_crm_port, resolve_database_path
 
 
 class ConfigParsingTests(unittest.TestCase):
@@ -32,6 +32,18 @@ class ConfigParsingTests(unittest.TestCase):
 
     def test_resolve_crm_port_uses_crm_port_without_railway_port(self) -> None:
         self.assertEqual(resolve_crm_port("", "8080"), 8080)
+
+    def test_resolve_database_path_prefers_explicit_path(self) -> None:
+        self.assertEqual(resolve_database_path("custom.sqlite3", "/data"), "custom.sqlite3")
+
+    def test_resolve_database_path_uses_railway_volume_for_default_path(self) -> None:
+        self.assertEqual(resolve_database_path("bot_data.sqlite3", "/data"), "/data/bot_data.sqlite3")
+
+    def test_resolve_database_path_uses_railway_volume_when_available(self) -> None:
+        self.assertEqual(resolve_database_path("", "/data"), "/data/bot_data.sqlite3")
+
+    def test_resolve_database_path_falls_back_to_local_sqlite(self) -> None:
+        self.assertEqual(resolve_database_path("", ""), "bot_data.sqlite3")
 
 
 if __name__ == "__main__":
