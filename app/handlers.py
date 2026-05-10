@@ -512,17 +512,27 @@ async def fallback_message(message: Message, state: FSMContext) -> None:
 
 
 async def notify_owner_about_start(message: Message, user: User) -> None:
-    username = f"@{user.username}" if user.username else "не указан"
-    text = (
-        "<b>Пользователь нажал /start</b>\n\n"
-        f"<b>Имя в Telegram:</b> {escape(user.full_name)}\n"
-        f"<b>Username:</b> {escape(username)}\n"
-        f"<b>User ID:</b> <code>{user.id}</code>"
+    text = build_start_owner_notification(
+        user,
+        database_path=settings.database_path,
+        users_count=count_users(settings.database_path),
     )
     try:
         await message.bot.send_message(settings.owner_chat_id, text)
     except Exception:
         logger.exception("Failed to notify owner about /start from user_id=%s", user.id)
+
+
+def build_start_owner_notification(user: User, *, database_path: str, users_count: int) -> str:
+    username = f"@{user.username}" if user.username else "не указан"
+    return (
+        "<b>Пользователь нажал /start</b>\n\n"
+        f"<b>Имя в Telegram:</b> {escape(user.full_name)}\n"
+        f"<b>Username:</b> {escape(username)}\n"
+        f"<b>User ID:</b> <code>{user.id}</code>\n\n"
+        f"<b>CRM users:</b> <code>{users_count}</code>\n"
+        f"<b>DB:</b> <code>{escape(database_path)}</code>"
+    )
 
 
 async def notify_owner_about_subscription_check_failure(

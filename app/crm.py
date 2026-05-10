@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,50 @@ class CrmUser:
     first_reminder_sent_at: str
     last_reminder_sent_at: str
     answers: dict[str, Any]
+
+
+def create_crm_test_user(database_path: str) -> int:
+    user_id = -1
+    timestamp = datetime.now(timezone.utc).isoformat()
+    with _connect(database_path) as connection:
+        _ensure_application_data_column(connection)
+        connection.execute(
+            """
+            INSERT INTO users (
+                user_id,
+                full_name,
+                username,
+                started_at,
+                updated_at,
+                completed_at,
+                first_reminder_sent_at,
+                last_reminder_sent_at,
+                reminder_count,
+                current_step,
+                form_data_json,
+                application_data_json
+            )
+            VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, 0, ?, ?, NULL)
+            ON CONFLICT(user_id) DO UPDATE SET
+                full_name = excluded.full_name,
+                username = excluded.username,
+                started_at = excluded.started_at,
+                updated_at = excluded.updated_at,
+                completed_at = NULL,
+                current_step = excluded.current_step,
+                form_data_json = excluded.form_data_json
+            """,
+            (
+                user_id,
+                "CRM Self Test",
+                "crm_self_test",
+                timestamp,
+                timestamp,
+                "self_test",
+                json.dumps({"contact": "CRM self-test row"}, ensure_ascii=False),
+            ),
+        )
+    return user_id
 
 
 def load_crm_users(database_path: str) -> list[CrmUser]:
@@ -71,7 +116,8 @@ def render_crm_html(users: list[CrmUser], database_path: str) -> str:
     if not rows_html:
         rows_html = (
             '<tr><td class="empty" colspan="16">'
-            "Пользователей пока нет. Как только кто-то нажмет /start, он появится здесь."
+            "Пользователей пока нет. Нажмите «Тест записи», чтобы проверить, "
+            "что CRM пишет именно в эту базу."
             "</td></tr>"
         )
 
@@ -124,6 +170,31 @@ def render_crm_html(users: list[CrmUser], database_path: str) -> str:
       flex-wrap: wrap;
       justify-content: flex-end;
     }}
+    .actions {{
+      display: flex;
+      gap: 10px;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }}
+    .action-link {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 32px;
+      padding: 6px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      color: var(--text);
+      font-weight: 650;
+      font-size: 13px;
+    }}
+    .action-link-primary {{
+      border-color: var(--blue);
+      background: var(--blue);
+      color: #ffffff;
+    }}
+    .action-link:hover {{ text-decoration: none; }}
     .stat {{
       min-width: 128px;
       padding: 10px 12px;
@@ -205,6 +276,10 @@ def render_crm_html(users: list[CrmUser], database_path: str) -> str:
     <div>
       <h1>B2Bots CRM</h1>
       <div class="meta">База: {escape(Path(database_path).name)} · обновите страницу, чтобы подтянуть свежие данные</div>
+      <div class="actions">
+        <a class="action-link action-link-primary" href="/self-test">Тест записи</a>
+        <a class="action-link" href="/debug">Диагностика</a>
+      </div>
     </div>
     <div class="stats" aria-label="Сводка">
       <div class="stat"><span class="stat-value">{len(users)}</span><span class="stat-label">Всего пользователей: {len(users)}</span></div>
