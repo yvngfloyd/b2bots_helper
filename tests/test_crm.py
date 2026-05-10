@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 from pathlib import Path
 
 from app.crm import create_crm_test_user, load_crm_users, render_crm_debug_html, render_crm_html
@@ -64,6 +65,13 @@ class CrmTests(unittest.TestCase):
         self.assertIn("bot.sqlite3", html)
         self.assertIn("/debug", html)
         self.assertIn("/self-test", html)
+
+    def test_render_crm_html_warns_when_local_crm_is_not_connected_to_bot_runtime(self) -> None:
+        with patch.dict("os.environ", {"BOT_TOKEN": "", "OWNER_CHAT_ID": ""}):
+            html = render_crm_html([], self.database_path)
+
+        self.assertIn("Локальная CRM не подключена к Telegram-боту", html)
+        self.assertIn("python main.py", html)
 
     def test_render_debug_html_shows_database_path_and_latest_users(self) -> None:
         upsert_started_user(self.database_path, 101, "Alice", "alice", self.now)

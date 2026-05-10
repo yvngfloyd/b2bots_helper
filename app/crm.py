@@ -112,6 +112,7 @@ def load_crm_users(database_path: str) -> list[CrmUser]:
 def render_crm_html(users: list[CrmUser], database_path: str) -> str:
     completed_count = sum(1 for user in users if user.completed_at)
     active_count = len(users) - completed_count
+    runtime_notice = _render_runtime_notice()
     rows_html = "\n".join(_render_user_row(user) for user in users)
     if not rows_html:
         rows_html = (
@@ -208,6 +209,19 @@ def render_crm_html(users: list[CrmUser], database_path: str) -> str:
       font-weight: 700;
     }}
     main {{ padding: 20px 32px 32px; }}
+    .notice {{
+      margin-bottom: 16px;
+      padding: 12px 14px;
+      border: 1px solid #fedf89;
+      border-radius: 8px;
+      background: #fffaeb;
+      color: #93370d;
+    }}
+    .notice strong {{ color: #7a2e0e; }}
+    .notice code {{
+      color: #7a2e0e;
+      font-weight: 650;
+    }}
     .table-wrap {{
       overflow: auto;
       border: 1px solid var(--line);
@@ -288,6 +302,7 @@ def render_crm_html(users: list[CrmUser], database_path: str) -> str:
     </div>
   </header>
   <main>
+    {runtime_notice}
     <div class="table-wrap">
       <table>
         <thead>
@@ -313,6 +328,19 @@ def render_crm_html(users: list[CrmUser], database_path: str) -> str:
   </main>
 </body>
 </html>"""
+
+
+def _render_runtime_notice() -> str:
+    if os.getenv("BOT_TOKEN", "").strip() and os.getenv("OWNER_CHAT_ID", "").strip():
+        return ""
+    return (
+        '<div class="notice">'
+        "<strong>Локальная CRM не подключена к Telegram-боту.</strong> "
+        "Эта страница читает только локальный SQLite-файл. Чтобы здесь появлялись реальные "
+        "пользователи из Telegram, запускайте бота через <code>python main.py</code> "
+        "с тем же <code>DATABASE_PATH</code> или открывайте CRM на Railway-домене."
+        "</div>"
+    )
 
 
 def render_crm_debug_html(database_path: str) -> str:
