@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.storage import (
+    get_application_data,
     get_form_snapshot,
     get_due_reminders,
     initialize_database,
@@ -108,7 +109,7 @@ class StorageReminderTests(unittest.TestCase):
         self.assertEqual(snapshot.form_data["history"], [0, 1, 2])
         self.assertEqual(snapshot.form_data["business_type"], "Услуги")
 
-    def test_completed_user_loses_resume_snapshot(self) -> None:
+    def test_completed_user_loses_resume_snapshot_and_keeps_application_data(self) -> None:
         upsert_started_user(self.database_path, 101, "Alice", "alice", self.now)
         save_form_snapshot(
             self.database_path,
@@ -117,9 +118,18 @@ class StorageReminderTests(unittest.TestCase):
             form_data={"history": [0, 1, 2, 3, 4, 5, 6]},
             now=self.now + timedelta(minutes=10),
         )
-        mark_completed(self.database_path, 101, self.now + timedelta(minutes=20))
+        mark_completed(
+            self.database_path,
+            101,
+            self.now + timedelta(minutes=20),
+            application_data={"business_type": "Услуги", "contact": "@alice"},
+        )
 
         self.assertIsNone(get_form_snapshot(self.database_path, 101))
+        self.assertEqual(
+            get_application_data(self.database_path, 101),
+            {"business_type": "Услуги", "contact": "@alice"},
+        )
 
 
 if __name__ == "__main__":

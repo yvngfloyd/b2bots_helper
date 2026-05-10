@@ -473,7 +473,7 @@ async def finalize_application(message: Message, state: FSMContext, contact: str
 
     await message.bot.send_message(settings.owner_chat_id, lead_text)
     if application_user:
-        mark_completed(settings.database_path, application_user.id)
+        mark_completed(settings.database_path, application_user.id, application_data=data)
     await state.clear()
 
     thanks_text = (

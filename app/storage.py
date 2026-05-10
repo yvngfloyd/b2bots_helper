@@ -41,12 +41,14 @@ def initialize_database(database_path: str) -> None:
                 last_reminder_sent_at TEXT,
                 reminder_count INTEGER NOT NULL DEFAULT 0,
                 current_step TEXT,
-                form_data_json TEXT
+                form_data_json TEXT,
+                application_data_json TEXT
             )
             """
         )
         _ensure_column(connection, "users", "current_step", "TEXT")
         _ensure_column(connection, "users", "form_data_json", "TEXT")
+        _ensure_column(connection, "users", "application_data_json", "TEXT")
 
 
 def upsert_started_user(
@@ -108,16 +110,31 @@ def upsert_started_user(
         )
 
 
-def mark_completed(database_path: str, user_id: int, now: datetime | None = None) -> None:
+def mark_completed(
+    database_path: str,
+    user_id: int,
+    now: datetime | None = None,
+    application_data: dict[str, Any] | None = None,
+) -> None:
     current_time = _to_utc(now)
+    application_data_json = (
+        json.dumps(application_data, ensure_ascii=False)
+        if application_data is not None
+        else None
+    )
     with _connect(database_path) as connection:
         connection.execute(
             """
             UPDATE users
-            SET completed_at = ?, updated_at = ?, current_step = NULL, form_data_json = NULL
+            SET
+                completed_at = ?,
+                updated_at = ?,
+                current_step = NULL,
+                form_data_json = NULL,
+                application_data_json = COALESCE(?, application_data_json)
             WHERE user_id = ?
             """,
-            (_serialize(current_time), _serialize(current_time), user_id),
+            (_serialize(current_time), _serialize(current_time), application_data_json, user_id),
         )
 
 
@@ -220,6 +237,23 @@ def get_form_snapshot(database_path: str, user_id: int) -> FormSnapshot | None:
         current_step=str(row["current_step"]),
         form_data=json.loads(str(row["form_data_json"])),
     )
+
+
+def get_application_data(database_path: str, user_id: int) -> dict[str, Any] | None:
+    with _connect(database_path) as connection:
+        row = connection.execute(
+            """
+            SELECT application_data_json
+            FROM users
+            WHERE user_id = ?
+            """,
+            (user_id,),
+        ).fetchone()
+
+    if row is None or row["application_data_json"] is None:
+        return None
+
+    return json.loads(str(row["application_data_json"]))
 
 
 def _connect(database_path: str) -> sqlite3.Connection:
