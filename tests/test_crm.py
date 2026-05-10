@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.crm import load_crm_users, render_crm_html
+from crm_server import is_authorized
 from app.storage import (
     initialize_database,
     mark_completed,
@@ -61,6 +62,19 @@ class CrmTests(unittest.TestCase):
         self.assertIn("&lt;Alice&gt;", html)
         self.assertIn("Всего пользователей: 1", html)
         self.assertIn("bot.sqlite3", html)
+
+
+class CrmAuthTests(unittest.TestCase):
+    def test_auth_is_open_when_credentials_are_missing(self) -> None:
+        self.assertTrue(is_authorized(None, "", ""))
+        self.assertTrue(is_authorized(None, "admin", ""))
+
+    def test_auth_accepts_matching_basic_header(self) -> None:
+        self.assertTrue(is_authorized("Basic YWRtaW46cGFzcw==", "admin", "pass"))
+
+    def test_auth_rejects_missing_or_wrong_header(self) -> None:
+        self.assertFalse(is_authorized(None, "admin", "pass"))
+        self.assertFalse(is_authorized("Basic YWRtaW46d3Jvbmc=", "admin", "pass"))
 
 
 if __name__ == "__main__":

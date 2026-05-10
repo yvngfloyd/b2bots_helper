@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import os
+import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
@@ -33,11 +35,25 @@ def main() -> None:
         default=os.getenv("DATABASE_PATH", DEFAULT_DATABASE_PATH),
         help=f"SQLite database path. Default: {DEFAULT_DATABASE_PATH}",
     )
+    parser.add_argument(
+        "--username",
+        default=os.getenv("CRM_USERNAME", ""),
+        help="Optional basic auth username.",
+    )
+    parser.add_argument(
+        "--password",
+        default=os.getenv("CRM_PASSWORD", ""),
+        help="Optional basic auth password.",
+    )
     args = parser.parse_args()
 
-    initialize_database(args.database)
-    handler_class = make_handler(args.database)
-    server = ThreadingHTTPServer((args.host, args.port), handler_class)
+    server = create_crm_server(
+        args.database,
+        args.host,
+        args.port,
+        username=args.username,
+        password=args.password,
+    )
     print(f"CRM is running at http://{args.host}:{args.port}")
     print(f"Database: {args.database}")
     try:
@@ -48,9 +64,51 @@ def main() -> None:
         server.server_close()
 
 
-def make_handler(database_path: str) -> type[BaseHTTPRequestHandler]:
+def create_crm_server(
+    database_path: str,
+    host: str,
+    port: int,
+    *,
+    username: str = "",
+    password: str = "",
+) -> ThreadingHTTPServer:
+    initialize_database(database_path)
+    handler_class = make_handler(database_path, username=username, password=password)
+    return ThreadingHTTPServer((host, port), handler_class)
+
+
+def start_crm_server(
+    database_path: str,
+    host: str,
+    port: int,
+    *,
+    username: str = "",
+    password: str = "",
+) -> ThreadingHTTPServer:
+    server = create_crm_server(
+        database_path,
+        host,
+        port,
+        username=username,
+        password=password,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server
+
+
+def make_handler(
+    database_path: str,
+    *,
+    username: str = "",
+    password: str = "",
+) -> type[BaseHTTPRequestHandler]:
     class CrmRequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
+            if not is_authorized(self.headers.get("Authorization"), username, password):
+                self._request_auth()
+                return
+
             path = urlparse(self.path).path
             if path in {"", "/"}:
                 self._send_html(render_crm_html(load_crm_users(database_path), database_path))
@@ -79,7 +137,29 @@ def make_handler(database_path: str) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(payload)
 
+        def _request_auth(self) -> None:
+            payload = b"Authentication required"
+            self.send_response(HTTPStatus.UNAUTHORIZED)
+            self.send_header("WWW-Authenticate", 'Basic realm="B2Bots CRM"')
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
     return CrmRequestHandler
+
+
+def is_authorized(header: str | None, username: str, password: str) -> bool:
+    if not username or not password:
+        return True
+    if not header or not header.startswith("Basic "):
+        return False
+    try:
+        decoded = base64.b64decode(header.removeprefix("Basic ").strip()).decode("utf-8")
+    except Exception:
+        return False
+    expected = f"{username}:{password}"
+    return decoded == expected
 
 
 if __name__ == "__main__":

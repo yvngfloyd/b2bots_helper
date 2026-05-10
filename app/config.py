@@ -22,6 +22,11 @@ class Settings:
     first_reminder_hours: int = 1
     reminder_repeat_days: int = 3
     reminder_check_seconds: int = 300
+    crm_enabled: bool = False
+    crm_host: str = "127.0.0.1"
+    crm_port: int = 8080
+    crm_username: str = ""
+    crm_password: str = ""
 
 
 def _get_required_env(name: str) -> str:
@@ -56,4 +61,9 @@ settings = Settings(
     first_reminder_hours=int(os.getenv("FIRST_REMINDER_HOURS", "1")),
     reminder_repeat_days=int(os.getenv("REMINDER_REPEAT_DAYS", "3")),
     reminder_check_seconds=int(os.getenv("REMINDER_CHECK_SECONDS", "300")),
+    crm_enabled=parse_bool(os.getenv("CRM_ENABLED"), default=False),
+    crm_host=os.getenv("CRM_HOST", "").strip() or "127.0.0.1",
+    crm_port=int(os.getenv("CRM_PORT") or os.getenv("PORT") or "8080"),
+    crm_username=os.getenv("CRM_USERNAME", "").strip(),
+    crm_password=os.getenv("CRM_PASSWORD", "").strip(),
 )
