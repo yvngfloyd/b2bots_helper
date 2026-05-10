@@ -45,6 +45,13 @@ class ConfigParsingTests(unittest.TestCase):
     def test_resolve_database_path_falls_back_to_local_sqlite(self) -> None:
         self.assertEqual(resolve_database_path("", ""), "bot_data.sqlite3")
 
+    def test_settings_reads_admin_token(self) -> None:
+        from app.config import Settings
+
+        settings = Settings(bot_token="123:abc", owner_chat_id=1, site_url="", tg_channel_url="", admin_token="secret")
+
+        self.assertEqual(settings.admin_token, "secret")
+
 
 if __name__ == "__main__":
     unittest.main()

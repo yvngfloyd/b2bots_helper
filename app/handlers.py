@@ -25,6 +25,7 @@ from app.keyboards import (
 from app.states import LeadForm
 from app.storage import count_users, get_form_snapshot, mark_completed, save_form_snapshot, upsert_started_user
 from app.subscription import SubscriptionCheckStatus, check_user_subscription, resolve_subscription_chat_id
+from app.tracking import track_callback_user, track_message_user
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -120,18 +121,13 @@ async def show_start(message: Message) -> None:
 @router.message(F.text == "/start")
 async def cmd_start(message: Message, state: FSMContext) -> None:
     await state.clear()
+    await track_message_user(message, source="start")
     if message.from_user:
-        upsert_started_user(
-            settings.database_path,
-            message.from_user.id,
-            message.from_user.full_name,
-            message.from_user.username,
-        )
         logger.info(
             "Saved /start user_id=%s database_path=%s users_count=%s",
             message.from_user.id,
             settings.database_path,
-            count_users(settings.database_path),
+            safe_count_users(),
         )
         await notify_owner_about_start(message, message.from_user)
     await show_start(message)
@@ -140,6 +136,7 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
 @router.callback_query(F.data == "form:start")
 @router.callback_query(F.data == "form:restart")
 async def start_form(callback: CallbackQuery, state: FSMContext) -> None:
+    await track_callback_user(callback, source="form")
     if not await ensure_subscription(callback, "start"):
         return
     await begin_form(callback, state)
@@ -148,6 +145,7 @@ async def start_form(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "subscription:check:start")
 async def check_subscription_for_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await track_callback_user(callback, source="subscription")
     if not await ensure_subscription(callback, "start"):
         return
     await begin_form(callback, state)
@@ -156,6 +154,7 @@ async def check_subscription_for_start(callback: CallbackQuery, state: FSMContex
 
 @router.callback_query(F.data == "subscription:check:continue")
 async def check_subscription_for_continue(callback: CallbackQuery, state: FSMContext) -> None:
+    await track_callback_user(callback, source="subscription")
     if not await ensure_subscription(callback, "continue"):
         return
     resumed = await resume_saved_form(callback, state)
@@ -163,6 +162,7 @@ async def check_subscription_for_continue(callback: CallbackQuery, state: FSMCon
 
 
 async def begin_form(callback: CallbackQuery, state: FSMContext) -> None:
+    safe_upsert_started_user(callback.from_user)
     await state.clear()
     await state.update_data(history=[])
     await ask_question(
@@ -175,6 +175,7 @@ async def begin_form(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "reminder:continue")
 async def continue_form(callback: CallbackQuery, state: FSMContext) -> None:
+    await track_callback_user(callback, source="reminder")
     if not await ensure_subscription(callback, "continue"):
         return
     resumed = await resume_saved_form(callback, state)
@@ -285,6 +286,7 @@ def find_question_by_prefix(prefix: str) -> dict[str, Any] | None:
 
 @router.callback_query(F.data == "nav:back")
 async def go_back(callback: CallbackQuery, state: FSMContext) -> None:
+    await track_callback_user(callback, source="form")
     data = await state.get_data()
     history = data.get("history", [])
 
@@ -356,6 +358,7 @@ async def go_back(callback: CallbackQuery, state: FSMContext) -> None:
     )
 )
 async def process_choice(callback: CallbackQuery, state: FSMContext) -> None:
+    await track_callback_user(callback, source="form")
     prefix, raw_index = callback.data.split(":", 1)
     item = find_question_by_prefix(prefix)
     if item is None:
@@ -391,6 +394,7 @@ async def process_choice(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(LeadForm.task_description)
 async def process_task_description(message: Message, state: FSMContext) -> None:
+    await track_message_user(message, source="form")
     text = (message.text or "").strip()
     if len(text) < 5:
         await message.answer("Пожалуйста, напишите чуть подробнее, хотя бы в 5 символов")
@@ -407,6 +411,7 @@ async def process_task_description(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data.startswith("contact_method:"))
 async def process_contact_method(callback: CallbackQuery, state: FSMContext) -> None:
+    await track_callback_user(callback, source="form")
     _, raw_index = callback.data.split(":", 1)
     answer = contact_methods[int(raw_index) - 1]
 
@@ -444,6 +449,7 @@ async def process_contact_method(callback: CallbackQuery, state: FSMContext) -> 
 
 @router.message(LeadForm.manual_contact)
 async def process_manual_contact(message: Message, state: FSMContext) -> None:
+    await track_message_user(message, source="form")
     contact = (message.text or "").strip()
     if len(contact) < 3:
         await message.answer("Напишите корректный контакт")
@@ -479,7 +485,10 @@ async def finalize_application(message: Message, state: FSMContext, contact: str
 
     await message.bot.send_message(settings.owner_chat_id, lead_text)
     if application_user:
-        mark_completed(settings.database_path, application_user.id, application_data=data)
+        try:
+            mark_completed(settings.database_path, application_user.id, application_data=data)
+        except Exception:
+            logger.exception("Failed to mark application completed for user_id=%s", application_user.id)
     await state.clear()
 
     thanks_text = (
@@ -498,6 +507,7 @@ def resolve_application_user(message: Message, user: User | None = None) -> User
 
 @router.message()
 async def fallback_message(message: Message, state: FSMContext) -> None:
+    await track_message_user(message)
     current_state = await state.get_state()
 
     if current_state in {item["state"].state for item in QUESTIONS}:
@@ -515,12 +525,29 @@ async def notify_owner_about_start(message: Message, user: User) -> None:
     text = build_start_owner_notification(
         user,
         database_path=settings.database_path,
-        users_count=count_users(settings.database_path),
+        users_count=safe_count_users(),
     )
     try:
         await message.bot.send_message(settings.owner_chat_id, text)
     except Exception:
         logger.exception("Failed to notify owner about /start from user_id=%s", user.id)
+
+
+def safe_count_users() -> int:
+    try:
+        return count_users(settings.database_path)
+    except Exception:
+        logger.exception("Failed to count tracked users")
+        return 0
+
+
+def safe_upsert_started_user(user: User | None) -> None:
+    if user is None:
+        return
+    try:
+        upsert_started_user(settings.database_path, user.id, user.full_name, user.username)
+    except Exception:
+        logger.exception("Failed to reset started user state for user_id=%s", user.id)
 
 
 def build_start_owner_notification(user: User, *, database_path: str, users_count: int) -> str:
@@ -626,12 +653,15 @@ async def save_current_form_snapshot(
     if resolved_user_id is None:
         return
 
-    save_form_snapshot(
-        settings.database_path,
-        resolved_user_id,
-        current_step=current_step,
-        form_data=await state.get_data(),
-    )
+    try:
+        save_form_snapshot(
+            settings.database_path,
+            resolved_user_id,
+            current_step=current_step,
+            form_data=await state.get_data(),
+        )
+    except Exception:
+        logger.exception("Failed to save form snapshot for user_id=%s step=%s", resolved_user_id, current_step)
 
 
 def find_question_index_by_prefix(prefix: str) -> int | None:

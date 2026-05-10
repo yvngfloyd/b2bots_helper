@@ -28,6 +28,7 @@ class Settings:
     crm_port: int = 8080
     crm_username: str = ""
     crm_password: str = ""
+    admin_token: str = ""
 
 
 def _get_required_env(name: str) -> str:
@@ -89,4 +90,5 @@ settings = Settings(
     crm_port=resolve_crm_port(os.getenv("PORT"), os.getenv("CRM_PORT")),
     crm_username=os.getenv("CRM_USERNAME", "").strip(),
     crm_password=os.getenv("CRM_PASSWORD", "").strip(),
+    admin_token=os.getenv("ADMIN_TOKEN", "").strip(),
 )

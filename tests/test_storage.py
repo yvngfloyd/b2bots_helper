@@ -4,17 +4,26 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 from app.storage import (
+    APPLICATION_STATUSES,
     count_users,
     get_application_data,
     get_form_snapshot,
     get_due_reminders,
+    get_user_by_telegram_id,
+    get_user_stats,
     initialize_database,
+    list_users,
     mark_completed,
     mark_reminder_sent,
+    mark_user_application_completed,
+    patch_user_admin_fields,
     save_form_snapshot,
+    update_user_progress,
     upsert_started_user,
+    upsert_user_from_telegram,
 )
 
 
@@ -133,6 +142,145 @@ class StorageReminderTests(unittest.TestCase):
             get_application_data(self.database_path, 101),
             {"business_type": "Услуги", "contact": "@alice"},
         )
+
+
+class UserTrackingStorageTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmpdir.cleanup)
+        self.database_path = str(Path(self.tmpdir.name) / "bot.sqlite3")
+        initialize_database(self.database_path)
+        self.now = datetime(2026, 5, 11, 12, 0, tzinfo=timezone.utc)
+
+    def user(self, user_id: int = 101, username: str | None = "alice") -> SimpleNamespace:
+        return SimpleNamespace(
+            id=user_id,
+            username=username,
+            first_name="Alice",
+            last_name="Smith",
+            full_name="Alice Smith",
+            language_code="ru",
+        )
+
+    def test_upsert_user_from_telegram_creates_and_updates_profile(self) -> None:
+        upsert_user_from_telegram(
+            self.database_path,
+            self.user(),
+            message_text="/start",
+            source="start",
+            now=self.now,
+        )
+        upsert_user_from_telegram(
+            self.database_path,
+            self.user(username="alice_new"),
+            message_text="hello",
+            now=self.now + timedelta(minutes=5),
+        )
+
+        user = get_user_by_telegram_id(self.database_path, 101)
+
+        self.assertIsNotNone(user)
+        assert user is not None
+        self.assertEqual(user.telegram_id, 101)
+        self.assertEqual(user.username, "alice_new")
+        self.assertEqual(user.first_name, "Alice")
+        self.assertEqual(user.last_name, "Smith")
+        self.assertEqual(user.language_code, "ru")
+        self.assertEqual(user.source, "start")
+        self.assertEqual(user.first_seen_at, "2026-05-11T12:00:00+00:00")
+        self.assertEqual(user.last_seen_at, "2026-05-11T12:05:00+00:00")
+        self.assertEqual(user.last_message_text, "hello")
+        self.assertEqual(user.application_status, "new")
+
+    def test_progress_completion_reminder_and_admin_patch_update_tracking_fields(self) -> None:
+        upsert_user_from_telegram(self.database_path, self.user(), now=self.now)
+
+        update_user_progress(
+            self.database_path,
+            101,
+            current_step="budget",
+            answers={"business_type": "Услуги", "budget": "10-30"},
+            now=self.now + timedelta(minutes=1),
+        )
+        mark_reminder_sent(self.database_path, 101, self.now + timedelta(hours=1))
+        mark_user_application_completed(
+            self.database_path,
+            101,
+            answers={"business_type": "Услуги", "contact": "+79990000000"},
+            phone="+79990000000",
+            now=self.now + timedelta(hours=2),
+        )
+        patch_user_admin_fields(
+            self.database_path,
+            101,
+            application_status="contacted",
+            notes="Позвонить завтра",
+            is_blocked=True,
+            now=self.now + timedelta(hours=3),
+        )
+
+        user = get_user_by_telegram_id(self.database_path, 101)
+
+        self.assertIsNotNone(user)
+        assert user is not None
+        self.assertEqual(user.current_step, "")
+        self.assertTrue(user.is_application_completed)
+        self.assertEqual(user.application_status, "contacted")
+        self.assertEqual(user.answers["contact"], "+79990000000")
+        self.assertEqual(user.phone, "+79990000000")
+        self.assertEqual(user.reminder_count, 1)
+        self.assertEqual(user.last_reminder_at, "2026-05-11T13:00:00+00:00")
+        self.assertTrue(user.is_blocked)
+        self.assertEqual(user.notes, "Позвонить завтра")
+
+    def test_list_users_search_filters_sort_and_pagination(self) -> None:
+        upsert_user_from_telegram(self.database_path, self.user(101, "alice"), message_text="need crm", source="organic", now=self.now)
+        update_user_progress(self.database_path, 101, current_step="budget", answers={"budget": "10-30"}, now=self.now + timedelta(minutes=2))
+        upsert_user_from_telegram(self.database_path, self.user(202, "bob"), message_text="other", source="ads", now=self.now + timedelta(minutes=1))
+        mark_user_application_completed(self.database_path, 202, answers={"contact": "@bob"}, now=self.now + timedelta(minutes=3))
+
+        result = list_users(
+            self.database_path,
+            search="crm",
+            status="in_progress",
+            completed=False,
+            sort_by="last_seen_at",
+            sort_order="desc",
+            limit=10,
+            offset=0,
+        )
+
+        self.assertEqual(result.total, 1)
+        self.assertEqual([user.telegram_id for user in result.items], [101])
+
+        completed = list_users(self.database_path, completed=True)
+
+        self.assertEqual([user.telegram_id for user in completed.items], [202])
+
+    def test_stats_count_statuses_and_conversion(self) -> None:
+        upsert_user_from_telegram(self.database_path, self.user(101, "alice"), now=self.now)
+        update_user_progress(self.database_path, 101, current_step="budget", answers={}, now=self.now)
+        upsert_user_from_telegram(self.database_path, self.user(202, "bob"), now=self.now)
+        mark_user_application_completed(self.database_path, 202, answers={}, now=self.now)
+        upsert_user_from_telegram(self.database_path, self.user(303, "cara"), now=self.now - timedelta(days=8))
+        patch_user_admin_fields(self.database_path, 303, application_status="abandoned", now=self.now)
+
+        stats = get_user_stats(self.database_path, now=self.now)
+
+        self.assertEqual(stats["total_users"], 3)
+        self.assertEqual(stats["in_progress_users"], 1)
+        self.assertEqual(stats["completed_users"], 1)
+        self.assertEqual(stats["abandoned_users"], 1)
+        self.assertEqual(stats["users_today"], 2)
+        self.assertEqual(stats["users_last_7_days"], 2)
+        self.assertEqual(stats["conversion_to_completed_percent"], 33.33)
+
+    def test_rejects_invalid_admin_status(self) -> None:
+        upsert_user_from_telegram(self.database_path, self.user(), now=self.now)
+
+        self.assertNotIn("bad", APPLICATION_STATUSES)
+        with self.assertRaises(ValueError):
+            patch_user_admin_fields(self.database_path, 101, application_status="bad")
 
 
 if __name__ == "__main__":

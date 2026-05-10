@@ -10,19 +10,6 @@ from pathlib import Path
 from typing import Any
 
 
-ANSWER_FIELDS = [
-    ("business_type", "Ниша"),
-    ("lead_source", "Источник"),
-    ("current_problem", "Проблема"),
-    ("main_goal", "Цель"),
-    ("integration_need", "Интеграция"),
-    ("launch_time", "Срок"),
-    ("budget", "Бюджет"),
-    ("task_description", "Описание"),
-    ("contact", "Контакт"),
-]
-
-
 @dataclass(frozen=True)
 class CrmUser:
     user_id: int
@@ -116,7 +103,7 @@ def render_crm_html(users: list[CrmUser], database_path: str) -> str:
     rows_html = "\n".join(_render_user_row(user) for user in users)
     if not rows_html:
         rows_html = (
-            '<tr><td class="empty" colspan="16">'
+            '<tr><td class="empty" colspan="12">'
             "Пользователей пока нет. Нажмите «Тест записи», чтобы проверить, "
             "что CRM пишет именно в эту базу."
             "</td></tr>"
@@ -222,6 +209,43 @@ def render_crm_html(users: list[CrmUser], database_path: str) -> str:
       color: #7a2e0e;
       font-weight: 650;
     }}
+    .toolbar {{
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }}
+    input, select, textarea {{
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      color: var(--text);
+      padding: 7px 10px;
+      font: inherit;
+    }}
+    input[type="search"] {{ min-width: 260px; }}
+    button {{
+      min-height: 32px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      color: var(--text);
+      cursor: pointer;
+      font: inherit;
+      font-weight: 650;
+      padding: 6px 10px;
+    }}
+    button:hover {{ border-color: #98a2b3; }}
+    .sort-button {{
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      color: inherit;
+      padding: 0;
+      text-transform: uppercase;
+    }}
     .table-wrap {{
       overflow: auto;
       border: 1px solid var(--line);
@@ -260,6 +284,64 @@ def render_crm_html(users: list[CrmUser], database_path: str) -> str:
     }}
     .status-done {{ color: var(--green); background: #ecfdf3; }}
     .status-active {{ color: var(--amber); background: #fffaeb; }}
+    .status-new {{ color: #175cd3; background: #eff8ff; }}
+    .status-muted {{ color: #475467; background: #f2f4f7; }}
+    .modal-backdrop {{
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: rgb(16 24 40 / 44%);
+      z-index: 10;
+    }}
+    .modal-backdrop.open {{ display: flex; }}
+    .modal {{
+      width: min(760px, 100%);
+      max-height: calc(100vh - 48px);
+      overflow: auto;
+      border-radius: 8px;
+      background: #ffffff;
+      box-shadow: 0 20px 48px rgb(16 24 40 / 22%);
+    }}
+    .modal header {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 20px;
+    }}
+    .modal-body {{ padding: 18px 20px 20px; }}
+    .detail-grid {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 18px;
+      margin-bottom: 16px;
+    }}
+    .detail-label {{
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+    }}
+    .answers {{
+      display: grid;
+      gap: 8px;
+      margin: 12px 0 16px;
+    }}
+    .answer-row {{
+      display: grid;
+      grid-template-columns: 170px minmax(0, 1fr);
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--line);
+    }}
+    .modal-actions {{
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }}
     a {{ color: var(--blue); text-decoration: none; }}
     a:hover {{ text-decoration: underline; }}
     .long {{
@@ -282,6 +364,7 @@ def render_crm_html(users: list[CrmUser], database_path: str) -> str:
         justify-content: flex-start;
         margin-top: 16px;
       }}
+      .detail-grid, .answer-row {{ grid-template-columns: 1fr; }}
     }}
   </style>
 </head>
@@ -289,7 +372,7 @@ def render_crm_html(users: list[CrmUser], database_path: str) -> str:
   <header>
     <div>
       <h1>B2Bots CRM</h1>
-      <div class="meta">База: {escape(Path(database_path).name)} · обновите страницу, чтобы подтянуть свежие данные</div>
+      <div class="meta">База: {escape(Path(database_path).name)} · автообновление каждые 7 секунд</div>
       <div class="actions">
         <a class="action-link action-link-primary" href="/self-test">Тест записи</a>
         <a class="action-link" href="/debug">Диагностика</a>
@@ -303,31 +386,316 @@ def render_crm_html(users: list[CrmUser], database_path: str) -> str:
   </header>
   <main>
     {runtime_notice}
+    <div class="toolbar" aria-label="Фильтры пользователей">
+      <input id="search" type="search" placeholder="Поиск: username, имя, ID, сообщение">
+      <select id="status-filter">
+        <option value="">Все статусы</option>
+        <option value="new">Новый</option>
+        <option value="in_progress">В процессе</option>
+        <option value="completed">Завершил</option>
+        <option value="abandoned">Брошено</option>
+        <option value="contacted">Связались</option>
+        <option value="not_relevant">Не подходит</option>
+      </select>
+      <select id="completed-filter">
+        <option value="">Все заявки</option>
+        <option value="true">Завершенные</option>
+        <option value="false">Не завершенные</option>
+      </select>
+      <input id="source-filter" type="search" placeholder="Источник">
+      <a class="action-link" href="/api/users/export.csv">CSV</a>
+      <span class="meta" id="refresh-state">Загрузка...</span>
+    </div>
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
-            <th>User ID</th>
-            <th>Имя</th>
+            <th>Telegram ID</th>
             <th>Username</th>
+            <th>Имя</th>
             <th>Статус</th>
-            <th>Шаг</th>
-            <th>Старт</th>
-            <th>Обновлен</th>
-            <th>Завершен</th>
-            <th>Напоминаний</th>
-            <th>Последнее напоминание</th>
-            {''.join(f'<th>{escape(label)}</th>' for _, label in ANSWER_FIELDS)}
+            <th>Completed</th>
+            <th>Current step</th>
+            <th>Source</th>
+            <th><button class="sort-button" data-sort="reminder_count">Reminder count</button></th>
+            <th><button class="sort-button" data-sort="first_seen_at">First seen</button></th>
+            <th><button class="sort-button" data-sort="last_seen_at">Last seen</button></th>
+            <th>Last message</th>
+            <th>Actions</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody id="users-body">
           {rows_html}
         </tbody>
       </table>
     </div>
+    <div class="modal-backdrop" id="user-modal" role="dialog" aria-modal="true">
+      <section class="modal">
+        <header>
+          <h2 id="modal-title">Пользователь</h2>
+          <button type="button" id="modal-close">Закрыть</button>
+        </header>
+        <div class="modal-body" id="modal-body"></div>
+      </section>
+    </div>
   </main>
+  {_render_crm_script()}
 </body>
 </html>"""
+
+
+def _render_crm_script() -> str:
+    return r"""<script>
+(() => {
+  const labels = {
+    new: "Новый",
+    in_progress: "В процессе",
+    completed: "Завершил",
+    abandoned: "Брошено",
+    contacted: "Связались",
+    not_relevant: "Не подходит",
+  };
+  const badgeClasses = {
+    new: "status-new",
+    in_progress: "status-active",
+    completed: "status-done",
+    abandoned: "status-muted",
+    contacted: "status-done",
+    not_relevant: "status-muted",
+  };
+  const answerLabels = {
+    business_type: "Ниша",
+    lead_source: "Источник",
+    current_problem: "Проблема",
+    main_goal: "Цель",
+    integration_need: "Интеграция",
+    launch_time: "Срок",
+    budget: "Бюджет",
+    task_description: "Описание",
+    contact: "Контакт",
+  };
+  const state = {
+    sortBy: "last_seen_at",
+    sortOrder: "desc",
+    limit: 50,
+    offset: 0,
+    selectedUser: null,
+  };
+  const body = document.querySelector("#users-body");
+  const refreshState = document.querySelector("#refresh-state");
+  const modal = document.querySelector("#user-modal");
+  const modalBody = document.querySelector("#modal-body");
+  const modalTitle = document.querySelector("#modal-title");
+
+  function authHeaders(extra = {}) {
+    const token = window.localStorage.getItem("B2BOTS_ADMIN_TOKEN") || "";
+    return token ? {...extra, Authorization: `Bearer ${token}`} : extra;
+  }
+
+  function value(id) {
+    return document.querySelector(id).value.trim();
+  }
+
+  function params() {
+    const query = new URLSearchParams({
+      sort_by: state.sortBy,
+      sort_order: state.sortOrder,
+      limit: String(state.limit),
+      offset: String(state.offset),
+    });
+    const search = value("#search");
+    const status = value("#status-filter");
+    const completed = value("#completed-filter");
+    const source = value("#source-filter");
+    if (search) query.set("search", search);
+    if (status) query.set("status", status);
+    if (completed) query.set("completed", completed);
+    if (source) query.set("source", source);
+    return query;
+  }
+
+  async function api(path, options = {}) {
+    const url = new URL(path, window.location.href);
+    url.username = "";
+    url.password = "";
+    const response = await fetch(url.toString(), {
+      ...options,
+      credentials: "same-origin",
+      headers: authHeaders(options.headers || {}),
+    });
+    if (!response.ok) throw new Error(await response.text());
+    return response.json();
+  }
+
+  async function loadUsers() {
+    try {
+      const [users, stats] = await Promise.all([
+        api(`/api/users?${params().toString()}`),
+        api("/api/users/stats"),
+      ]);
+      renderStats(stats);
+      renderRows(users.items);
+      refreshState.textContent = `Обновлено: ${new Date().toLocaleTimeString("ru-RU")}`;
+    } catch (error) {
+      refreshState.textContent = "Не удалось загрузить данные";
+      console.error(error);
+    }
+  }
+
+  function renderStats(stats) {
+    const values = document.querySelectorAll(".stat-value");
+    const labelsEls = document.querySelectorAll(".stat-label");
+    if (values[0]) values[0].textContent = stats.total_users;
+    if (labelsEls[0]) labelsEls[0].textContent = `Всего пользователей: ${stats.total_users}`;
+    if (values[1]) values[1].textContent = stats.in_progress_users;
+    if (values[2]) values[2].textContent = stats.completed_users;
+  }
+
+  function renderRows(items) {
+    if (!items.length) {
+      body.innerHTML = '<tr><td class="empty" colspan="12">Пользователей пока нет. Как только кто-то нажмет /start, он появится здесь.</td></tr>';
+      return;
+    }
+    body.innerHTML = items.map((user) => {
+      const username = user.username
+        ? `<a href="https://t.me/${escapeHtml(user.username)}" target="_blank" rel="noreferrer">@${escapeHtml(user.username)}</a>`
+        : '<span class="muted">-</span>';
+      const status = labels[user.application_status] || user.application_status || "Новый";
+      const statusClass = badgeClasses[user.application_status] || "status-muted";
+      return `<tr>
+        <td><code>${user.telegram_id}</code></td>
+        <td>${username}</td>
+        <td>${escapeHtml(fullName(user)) || '<span class="muted">-</span>'}</td>
+        <td><span class="status ${statusClass}">${escapeHtml(status)}</span></td>
+        <td>${user.is_application_completed ? "Да" : "Нет"}</td>
+        <td>${format(user.current_step)}</td>
+        <td>${format(user.source)}</td>
+        <td>${user.reminder_count || 0}</td>
+        <td>${format(user.first_seen_at)}</td>
+        <td>${format(user.last_seen_at)}</td>
+        <td class="long">${format(user.last_message_text)}</td>
+        <td>
+          <button type="button" data-action="open" data-id="${user.telegram_id}">Открыть</button>
+          <button type="button" data-action="copy-id" data-id="${user.telegram_id}">ID</button>
+          ${user.username ? `<button type="button" data-action="copy-username" data-username="${escapeHtml(user.username)}">@</button>` : ""}
+          <button type="button" data-action="contacted" data-id="${user.telegram_id}">Связались</button>
+        </td>
+      </tr>`;
+    }).join("");
+  }
+
+  async function openUser(id) {
+    const user = await api(`/api/users/${id}`);
+    state.selectedUser = user;
+    modalTitle.textContent = `Пользователь ${user.telegram_id}`;
+    const answers = user.answers || {};
+    const answersHtml = Object.keys(answers).length
+      ? Object.entries(answers).map(([key, val]) => `<div class="answer-row"><b>${escapeHtml(answerLabels[key] || key)}</b><span>${format(val)}</span></div>`).join("")
+      : '<div class="muted">Ответов пока нет</div>';
+    modalBody.innerHTML = `
+      <div class="detail-grid">
+        ${detail("Telegram ID", user.telegram_id)}
+        ${detail("Username", user.username ? `@${user.username}` : "")}
+        ${detail("Имя", fullName(user))}
+        ${detail("Язык", user.language_code)}
+        ${detail("Телефон", user.phone)}
+        ${detail("Источник", user.source)}
+        ${detail("Статус", labels[user.application_status] || user.application_status)}
+        ${detail("Текущий шаг", user.current_step)}
+        ${detail("Первый визит", user.first_seen_at)}
+        ${detail("Последний визит", user.last_seen_at)}
+        ${detail("Напоминаний", user.reminder_count)}
+        ${detail("Последнее напоминание", user.last_reminder_at)}
+      </div>
+      <h3>Ответы</h3>
+      <div class="answers">${answersHtml}</div>
+      <label><span class="detail-label">Последнее сообщение</span><textarea id="last-message" rows="2" readonly>${escapeHtml(user.last_message_text || "")}</textarea></label>
+      <label><span class="detail-label">Заметки</span><textarea id="notes" rows="4">${escapeHtml(user.notes || "")}</textarea></label>
+      <div class="modal-actions">
+        <button type="button" data-modal-action="contacted">Связались</button>
+        <button type="button" data-modal-action="not_relevant">Не подходит</button>
+        <button type="button" data-modal-action="blocked">Заблокировать</button>
+        <button type="button" data-modal-action="save-notes">Сохранить заметки</button>
+      </div>
+    `;
+    modal.classList.add("open");
+  }
+
+  function detail(label, raw) {
+    return `<div><span class="detail-label">${escapeHtml(label)}</span><b>${format(raw)}</b></div>`;
+  }
+
+  async function patchUser(id, payload) {
+    const user = await api(`/api/users/${id}`, {
+      method: "PATCH",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload),
+    });
+    await loadUsers();
+    if (modal.classList.contains("open")) await openUser(user.telegram_id);
+  }
+
+  function fullName(user) {
+    return [user.first_name, user.last_name].filter(Boolean).join(" ");
+  }
+
+  function format(raw) {
+    if (raw === null || raw === undefined || raw === "") return '<span class="muted">-</span>';
+    if (typeof raw === "object") return escapeHtml(JSON.stringify(raw));
+    return escapeHtml(String(raw));
+  }
+
+  function escapeHtml(raw) {
+    return String(raw).replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    }[char]));
+  }
+
+  let debounceTimer = null;
+  document.querySelectorAll("#search, #source-filter").forEach((field) => {
+    field.addEventListener("input", () => {
+      window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(loadUsers, 250);
+    });
+  });
+  document.querySelectorAll("#status-filter, #completed-filter").forEach((field) => field.addEventListener("change", loadUsers));
+  document.querySelectorAll(".sort-button").forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextSort = button.dataset.sort;
+      state.sortOrder = state.sortBy === nextSort && state.sortOrder === "desc" ? "asc" : "desc";
+      state.sortBy = nextSort;
+      loadUsers();
+    });
+  });
+  body.addEventListener("click", async (event) => {
+    const target = event.target.closest("button");
+    if (!target) return;
+    if (target.dataset.action === "open") await openUser(target.dataset.id);
+    if (target.dataset.action === "copy-id") await navigator.clipboard.writeText(target.dataset.id);
+    if (target.dataset.action === "copy-username") await navigator.clipboard.writeText(`@${target.dataset.username}`);
+    if (target.dataset.action === "contacted") await patchUser(target.dataset.id, {application_status: "contacted"});
+  });
+  modalBody.addEventListener("click", async (event) => {
+    const target = event.target.closest("button");
+    if (!target || !state.selectedUser) return;
+    const id = state.selectedUser.telegram_id;
+    if (target.dataset.modalAction === "contacted") await patchUser(id, {application_status: "contacted"});
+    if (target.dataset.modalAction === "not_relevant") await patchUser(id, {application_status: "not_relevant"});
+    if (target.dataset.modalAction === "blocked") await patchUser(id, {is_blocked: true});
+    if (target.dataset.modalAction === "save-notes") await patchUser(id, {notes: document.querySelector("#notes").value});
+  });
+  document.querySelector("#modal-close").addEventListener("click", () => modal.classList.remove("open"));
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) modal.classList.remove("open");
+  });
+  loadUsers();
+  window.setInterval(loadUsers, 7000);
+})();
+</script>"""
 
 
 def _render_runtime_notice() -> str:
@@ -446,23 +814,20 @@ def _row_to_crm_user(row: sqlite3.Row) -> CrmUser:
 def _render_user_row(user: CrmUser) -> str:
     status_class = "status-done" if user.completed_at else "status-active"
     username = _render_username(user.username)
-    answer_cells = "".join(
-        f'<td class="{_answer_cell_class(key)}">{_format_value(user.answers.get(key))}</td>'
-        for key, _ in ANSWER_FIELDS
-    )
     return f"""
 <tr>
   <td><code>{user.user_id}</code></td>
-  <td>{escape(user.full_name) or '<span class="muted">-</span>'}</td>
   <td>{username}</td>
+  <td>{escape(user.full_name) or '<span class="muted">-</span>'}</td>
   <td><span class="status {status_class}">{escape(user.status)}</span></td>
+  <td>{'Да' if user.completed_at else 'Нет'}</td>
   <td>{_format_value(user.current_step)}</td>
+  <td><span class="muted">-</span></td>
+  <td>{user.reminder_count}</td>
   <td>{_format_value(user.started_at)}</td>
   <td>{_format_value(user.updated_at)}</td>
-  <td>{_format_value(user.completed_at)}</td>
-  <td>{user.reminder_count}</td>
-  <td>{_format_value(user.last_reminder_sent_at)}</td>
-  {answer_cells}
+  <td class="long">{_format_value(user.answers.get('task_description'))}</td>
+  <td><button type="button" data-action="open" data-id="{user.user_id}">Открыть</button></td>
 </tr>"""
 
 
@@ -479,10 +844,6 @@ def _format_value(value: Any) -> str:
     if isinstance(value, (dict, list)):
         return escape(json.dumps(value, ensure_ascii=False))
     return escape(str(value))
-
-
-def _answer_cell_class(key: str) -> str:
-    return "long" if key in {"task_description", "contact"} else ""
 
 
 def _parse_json(value: Any) -> dict[str, Any] | None:

@@ -33,6 +33,7 @@ async def main() -> None:
             settings.crm_port,
             username=settings.crm_username,
             password=settings.crm_password,
+            admin_token=settings.admin_token,
         )
         logging.info("CRM is running at http://%s:%s", settings.crm_host, settings.crm_port)
 
