@@ -192,6 +192,9 @@ async def resume_saved_form(callback: CallbackQuery, state: FSMContext) -> bool:
 
 
 async def ensure_subscription(callback: CallbackQuery, next_action: str) -> bool:
+    if not settings.require_subscription:
+        return True
+
     chat_id = resolve_subscription_chat_id(settings.subscription_channel_id, settings.tg_channel_url)
     if chat_id is None:
         logger.error(
