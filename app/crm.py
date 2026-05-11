@@ -406,6 +406,7 @@ def render_crm_html(users: list[CrmUser], database_path: str) -> str:
       <a class="action-link export-link" data-export="csv" href="/api/users/export.csv">CSV</a>
       <a class="action-link export-link" data-export="tsv" href="/api/users/export.tsv">TSV</a>
       <a class="action-link export-link" data-export="xlsx" href="/api/users/export.xlsx">Excel</a>
+      <a class="action-link export-link" data-export="list.txt" href="/api/users/export.list.txt">Список</a>
       <span class="meta" id="refresh-state">Загрузка...</span>
     </div>
     <div class="table-wrap">

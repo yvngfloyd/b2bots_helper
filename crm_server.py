@@ -168,6 +168,12 @@ def make_handler(
                 except ValueError as exc:
                     self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
                 return
+            if path == "/api/users/export.list.txt":
+                try:
+                    self._send_table_text(_api_export_users_list(database_path, query), "text/plain", "b2bots-users-list.txt")
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
             if path.startswith("/api/users/"):
                 telegram_id = _parse_telegram_id(path)
                 if telegram_id is None:
@@ -379,6 +385,21 @@ def _api_export_users_tsv(database_path: str, query: dict[str, list[str]]) -> st
     return output.getvalue()
 
 
+def _api_export_users_list(database_path: str, query: dict[str, list[str]]) -> str:
+    rows = _export_user_rows(database_path, query)
+    lines = []
+    for row in rows:
+        telegram_id = row["telegram_id"]
+        name = " ".join(str(row[key]).strip() for key in ("first_name", "last_name") if str(row[key]).strip())
+        display_name = name or "-"
+        username = str(row["username"]).strip()
+        if username:
+            lines.append(f"{telegram_id} | {display_name} | @{username} | {row['telegram_url']}")
+        else:
+            lines.append(f"{telegram_id} | {display_name} | username отсутствует")
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
 def _api_export_users_xlsx(database_path: str, query: dict[str, list[str]]) -> bytes:
     rows = _export_user_rows(database_path, query)
     table = [EXPORT_COLUMNS, *[[row[column] for column in EXPORT_COLUMNS] for row in rows]]
@@ -396,6 +417,7 @@ def _api_export_users_xlsx(database_path: str, query: dict[str, list[str]]) -> b
 EXPORT_COLUMNS = [
     "telegram_id",
     "username",
+    "telegram_url",
     "first_name",
     "last_name",
     "phone",
@@ -428,6 +450,7 @@ def _export_user_rows(database_path: str, query: dict[str, list[str]]) -> list[d
         {
             "telegram_id": user.telegram_id,
             "username": user.username,
+            "telegram_url": _telegram_url(user.username),
             "first_name": user.first_name,
             "last_name": user.last_name,
             "phone": user.phone,
@@ -444,6 +467,11 @@ def _export_user_rows(database_path: str, query: dict[str, list[str]]) -> list[d
         }
         for user in result.items
     ]
+
+
+def _telegram_url(username: str) -> str:
+    clean_username = username.strip().lstrip("@")
+    return f"https://t.me/{clean_username}" if clean_username else ""
 
 
 def _build_xlsx_sheet(rows: list[list[object]]) -> str:
