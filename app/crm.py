@@ -99,7 +99,7 @@ def load_crm_users(database_path: str) -> list[CrmUser]:
 def render_crm_html(users: list[CrmUser], database_path: str) -> str:
     completed_count = sum(1 for user in users if user.completed_at)
     active_count = len(users) - completed_count
-    runtime_notice = _render_runtime_notice()
+    runtime_notice = _render_runtime_notice(database_path)
     rows_html = "\n".join(_render_user_row(user) for user in users)
     if not rows_html:
         rows_html = (
@@ -710,7 +710,18 @@ def _render_crm_script() -> str:
 </script>"""
 
 
-def _render_runtime_notice() -> str:
+def _render_runtime_notice(database_path: str) -> str:
+    if os.getenv("RAILWAY_ENVIRONMENT", "").strip() and not str(database_path).startswith("/data/"):
+        return (
+            '<div class="notice">'
+            "<strong>База Railway не на persistent Volume.</strong> "
+            "Сейчас CRM читает <code>"
+            f"{escape(database_path)}"
+            "</code>. После рестарта или redeploy такой SQLite-файл может стать пустым. "
+            "Поставьте <code>DATABASE_PATH=/data/bot_data.sqlite3</code> и подключите Railway Volume с mount path <code>/data</code>."
+            "</div>"
+        )
+
     if os.getenv("BOT_TOKEN", "").strip() and os.getenv("OWNER_CHAT_ID", "").strip():
         return ""
     return (

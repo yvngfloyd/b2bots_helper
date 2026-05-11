@@ -25,6 +25,7 @@ async def main() -> None:
     dp.include_router(router)
 
     initialize_database(settings.database_path)
+    logging.info("SQLite database path: %s", settings.database_path)
     crm_server = None
     if settings.crm_enabled:
         crm_server = start_crm_server(

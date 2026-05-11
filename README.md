@@ -39,7 +39,7 @@ python main.py
 - `SUBSCRIPTION_CHANNEL_ID` - канал для проверки подписки. Для публичного канала можно указать `@username` или ссылку `https://t.me/...`; для приватного канала нужен числовой id вида `-100...`. Если не заполнить, бот попробует взять `@username` из `TG_CHANNEL_URL`.
 - `BOT_TITLE` - название бота.
 - `COVER_FILE_ID` - необязательно. Когда будет обложка, просто вставь file_id.
-- `DATABASE_PATH` - путь к SQLite-базе для пользователей и напоминаний. Локально по умолчанию `bot_data.sqlite3`. На Railway лучше оставить пустым и подключить Volume: бот сам возьмёт `RAILWAY_VOLUME_MOUNT_PATH/bot_data.sqlite3`.
+- `DATABASE_PATH` - путь к SQLite-базе для пользователей и напоминаний. Локально по умолчанию `bot_data.sqlite3`. На Railway лучше поставить `DATABASE_PATH=/data/bot_data.sqlite3` и подключить Volume с mount path `/data`; если переменная пустая или равна `bot_data.sqlite3`, бот сам попробует использовать `/data/bot_data.sqlite3`, когда такой mount доступен.
 - `FIRST_REMINDER_HOURS` - через сколько часов отправлять первое напоминание. По умолчанию `1`.
 - `REMINDER_REPEAT_DAYS` - как часто повторять лёгкие напоминания. По умолчанию `3`.
 - `REMINDER_CHECK_SECONDS` - как часто бот проверяет, кому пора отправить напоминание. По умолчанию `300`.
@@ -110,7 +110,7 @@ GET /api/users/export.list.txt
 
 1. Создай Volume в Railway и подключи его к сервису бота.
 2. Mount path поставь, например, `/data`.
-3. Удали переменную `DATABASE_PATH` или оставь её пустой. Если она равна `bot_data.sqlite3`, бот тоже автоматически перенесёт файл в Volume.
+3. Поставь `DATABASE_PATH=/data/bot_data.sqlite3`. Если забудешь или оставишь `bot_data.sqlite3`, бот всё равно попробует выбрать `/data/bot_data.sqlite3`, когда mount `/data` доступен.
 4. После редеплоя в `/debug` должно быть видно `Database path: /data/bot_data.sqlite3`.
 
 Если хочешь задать путь руками, поставь:

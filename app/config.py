@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from collections.abc import Callable
 from pathlib import PurePosixPath
 
 from dotenv import load_dotenv
@@ -58,11 +59,20 @@ def resolve_crm_port(port_env: str | None, crm_port_env: str | None, default: in
     return int(value)
 
 
-def resolve_database_path(database_path_env: str | None, railway_volume_mount_path: str | None) -> str:
+def resolve_database_path(
+    database_path_env: str | None,
+    railway_volume_mount_path: str | None,
+    *,
+    data_mount_exists: Callable[[str], bool] = os.path.isdir,
+) -> str:
     explicit_path = (database_path_env or "").strip()
     volume_path = (railway_volume_mount_path or "").strip()
-    if volume_path and explicit_path in {"", "bot_data.sqlite3", "./bot_data.sqlite3"}:
+    default_relative_paths = {"", "bot_data.sqlite3", "./bot_data.sqlite3"}
+    if volume_path and explicit_path in default_relative_paths:
         return str(PurePosixPath(volume_path) / "bot_data.sqlite3")
+
+    if explicit_path in default_relative_paths and data_mount_exists("/data"):
+        return "/data/bot_data.sqlite3"
 
     if explicit_path:
         return explicit_path

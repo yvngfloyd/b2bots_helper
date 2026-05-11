@@ -85,6 +85,16 @@ class CrmTests(unittest.TestCase):
         self.assertIn("Локальная CRM не подключена к Telegram-боту", html)
         self.assertIn("python main.py", html)
 
+    def test_render_crm_html_warns_when_railway_database_is_not_on_volume(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"BOT_TOKEN": "123:abc", "OWNER_CHAT_ID": "1", "RAILWAY_ENVIRONMENT": "production"},
+        ):
+            html = render_crm_html([], "bot_data.sqlite3")
+
+        self.assertIn("База Railway не на persistent Volume", html)
+        self.assertIn("/data/bot_data.sqlite3", html)
+
     def test_render_debug_html_shows_database_path_and_latest_users(self) -> None:
         upsert_started_user(self.database_path, 101, "Alice", "alice", self.now)
 

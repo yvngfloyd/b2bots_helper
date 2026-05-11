@@ -42,6 +42,21 @@ class ConfigParsingTests(unittest.TestCase):
     def test_resolve_database_path_uses_railway_volume_when_available(self) -> None:
         self.assertEqual(resolve_database_path("", "/data"), "/data/bot_data.sqlite3")
 
+    def test_resolve_database_path_uses_data_mount_when_railway_volume_env_is_missing(self) -> None:
+        self.assertEqual(
+            resolve_database_path("", "", data_mount_exists=lambda path: path == "/data"),
+            "/data/bot_data.sqlite3",
+        )
+
+    def test_resolve_database_path_moves_default_relative_path_to_data_mount(self) -> None:
+        self.assertEqual(
+            resolve_database_path("bot_data.sqlite3", "", data_mount_exists=lambda path: path == "/data"),
+            "/data/bot_data.sqlite3",
+        )
+
+    def test_resolve_database_path_keeps_explicit_persistent_path(self) -> None:
+        self.assertEqual(resolve_database_path("/data/custom.sqlite3", ""), "/data/custom.sqlite3")
+
     def test_resolve_database_path_falls_back_to_local_sqlite(self) -> None:
         self.assertEqual(resolve_database_path("", ""), "bot_data.sqlite3")
 
