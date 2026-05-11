@@ -99,6 +99,8 @@ GET /api/users/{telegram_id}
 PATCH /api/users/{telegram_id}
 GET /api/users/stats
 GET /api/users/export.csv
+GET /api/users/export.tsv
+GET /api/users/export.xlsx
 ```
 
 `PATCH /api/users/{telegram_id}` принимает `application_status`, `notes` и `is_blocked`. Если задан `ADMIN_TOKEN`, API принимает заголовок `Authorization: Bearer <ADMIN_TOKEN>`. Для обычного открытия страницы в браузере на Railway оставь включёнными `CRM_USERNAME` и `CRM_PASSWORD`.

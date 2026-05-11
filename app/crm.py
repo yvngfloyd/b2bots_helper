@@ -403,7 +403,9 @@ def render_crm_html(users: list[CrmUser], database_path: str) -> str:
         <option value="false">Не завершенные</option>
       </select>
       <input id="source-filter" type="search" placeholder="Источник">
-      <a class="action-link" href="/api/users/export.csv">CSV</a>
+      <a class="action-link export-link" data-export="csv" href="/api/users/export.csv">CSV</a>
+      <a class="action-link export-link" data-export="tsv" href="/api/users/export.tsv">TSV</a>
+      <a class="action-link export-link" data-export="xlsx" href="/api/users/export.xlsx">Excel</a>
       <span class="meta" id="refresh-state">Загрузка...</span>
     </div>
     <div class="table-wrap">
@@ -514,6 +516,14 @@ def _render_crm_script() -> str:
     return query;
   }
 
+  function syncExportLinks() {
+    const query = params().toString();
+    document.querySelectorAll(".export-link").forEach((link) => {
+      const format = link.dataset.export;
+      link.href = `/api/users/export.${format}?${query}`;
+    });
+  }
+
   async function api(path, options = {}) {
     const url = new URL(path, window.location.href);
     url.username = "";
@@ -529,6 +539,7 @@ def _render_crm_script() -> str:
 
   async function loadUsers() {
     try {
+      syncExportLinks();
       const [users, stats] = await Promise.all([
         api(`/api/users?${params().toString()}`),
         api("/api/users/stats"),

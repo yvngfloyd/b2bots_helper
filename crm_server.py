@@ -7,9 +7,11 @@ import io
 import json
 import os
 import threading
+import zipfile
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
+from xml.sax.saxutils import escape as xml_escape
 
 from app.crm import create_crm_test_user, load_crm_users, render_crm_debug_html, render_crm_html
 from app.storage import (
@@ -154,6 +156,18 @@ def make_handler(
                 except ValueError as exc:
                     self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
                 return
+            if path == "/api/users/export.tsv":
+                try:
+                    self._send_table_text(_api_export_users_tsv(database_path, query), "text/tab-separated-values", "b2bots-users.tsv")
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            if path == "/api/users/export.xlsx":
+                try:
+                    self._send_xlsx(_api_export_users_xlsx(database_path, query), "b2bots-users.xlsx")
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
             if path.startswith("/api/users/"):
                 telegram_id = _parse_telegram_id(path)
                 if telegram_id is None:
@@ -261,6 +275,26 @@ def make_handler(
             self.end_headers()
             self.wfile.write(payload)
 
+        def _send_table_text(self, body: str, content_type: str, filename: str) -> None:
+            payload = body.encode("utf-8-sig")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", f"{content_type}; charset=utf-8")
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def _send_xlsx(self, body: bytes, filename: str) -> None:
+            self.send_response(HTTPStatus.OK)
+            self.send_header(
+                "Content-Type",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         def _read_json_body(self) -> dict[str, object]:
             length = int(self.headers.get("Content-Length", "0") or "0")
             if length <= 0:
@@ -328,6 +362,57 @@ def _api_list_users(database_path: str, query: dict[str, list[str]]) -> dict[str
 
 
 def _api_export_users_csv(database_path: str, query: dict[str, list[str]]) -> str:
+    rows = _export_user_rows(database_path, query)
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=EXPORT_COLUMNS)
+    writer.writeheader()
+    writer.writerows(rows)
+    return output.getvalue()
+
+
+def _api_export_users_tsv(database_path: str, query: dict[str, list[str]]) -> str:
+    rows = _export_user_rows(database_path, query)
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=EXPORT_COLUMNS, delimiter="\t", lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    return output.getvalue()
+
+
+def _api_export_users_xlsx(database_path: str, query: dict[str, list[str]]) -> bytes:
+    rows = _export_user_rows(database_path, query)
+    table = [EXPORT_COLUMNS, *[[row[column] for column in EXPORT_COLUMNS] for row in rows]]
+    sheet_xml = _build_xlsx_sheet(table)
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", _xlsx_content_types())
+        archive.writestr("_rels/.rels", _xlsx_root_rels())
+        archive.writestr("xl/workbook.xml", _xlsx_workbook())
+        archive.writestr("xl/_rels/workbook.xml.rels", _xlsx_workbook_rels())
+        archive.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+    return output.getvalue()
+
+
+EXPORT_COLUMNS = [
+    "telegram_id",
+    "username",
+    "first_name",
+    "last_name",
+    "phone",
+    "source",
+    "application_status",
+    "is_application_completed",
+    "current_step",
+    "reminder_count",
+    "first_seen_at",
+    "last_seen_at",
+    "last_message_text",
+    "notes",
+    "answers_json",
+]
+
+
+def _export_user_rows(database_path: str, query: dict[str, list[str]]) -> list[dict[str, object]]:
     result = list_users(
         database_path,
         search=_query_value(query, "search"),
@@ -339,30 +424,8 @@ def _api_export_users_csv(database_path: str, query: dict[str, list[str]]) -> st
         limit=500,
         offset=0,
     )
-    output = io.StringIO()
-    writer = csv.DictWriter(
-        output,
-        fieldnames=[
-            "telegram_id",
-            "username",
-            "first_name",
-            "last_name",
-            "phone",
-            "source",
-            "application_status",
-            "is_application_completed",
-            "current_step",
-            "reminder_count",
-            "first_seen_at",
-            "last_seen_at",
-            "last_message_text",
-            "notes",
-            "answers_json",
-        ],
-    )
-    writer.writeheader()
-    for user in result.items:
-        writer.writerow({
+    return [
+        {
             "telegram_id": user.telegram_id,
             "username": user.username,
             "first_name": user.first_name,
@@ -378,8 +441,70 @@ def _api_export_users_csv(database_path: str, query: dict[str, list[str]]) -> st
             "last_message_text": user.last_message_text,
             "notes": user.notes,
             "answers_json": user.answers_json,
-        })
-    return output.getvalue()
+        }
+        for user in result.items
+    ]
+
+
+def _build_xlsx_sheet(rows: list[list[object]]) -> str:
+    row_xml = []
+    for row_index, row in enumerate(rows, start=1):
+        cells = []
+        for column_index, value in enumerate(row, start=1):
+            reference = f"{_xlsx_column_name(column_index)}{row_index}"
+            text = xml_escape("" if value is None else str(value))
+            cells.append(f'<c r="{reference}" t="inlineStr"><is><t>{text}</t></is></c>')
+        row_xml.append(f'<row r="{row_index}">{"".join(cells)}</row>')
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        '<sheetData>'
+        f'{"".join(row_xml)}'
+        '</sheetData>'
+        '</worksheet>'
+    )
+
+
+def _xlsx_column_name(index: int) -> str:
+    name = ""
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        name = chr(65 + remainder) + name
+    return name
+
+
+def _xlsx_content_types() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>"""
+
+
+def _xlsx_root_rels() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"""
+
+
+def _xlsx_workbook() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Users" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"""
+
+
+def _xlsx_workbook_rels() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"""
 
 
 def _tracked_user_to_dict(user: TrackedUser, *, include_parsed_answers: bool = False) -> dict[str, object]:

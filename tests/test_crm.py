@@ -7,7 +7,14 @@ from unittest.mock import patch
 from pathlib import Path
 
 from app.crm import create_crm_test_user, load_crm_users, render_crm_debug_html, render_crm_html
-from crm_server import _api_export_users_csv, _api_list_users, _tracked_user_to_dict, is_authorized
+from crm_server import (
+    _api_export_users_csv,
+    _api_export_users_tsv,
+    _api_export_users_xlsx,
+    _api_list_users,
+    _tracked_user_to_dict,
+    is_authorized,
+)
 from app.storage import (
     get_user_by_telegram_id,
     initialize_database,
@@ -151,6 +158,28 @@ class CrmTests(unittest.TestCase):
 
         self.assertIn("telegram_id,username,first_name", csv_body)
         self.assertIn("505,eve,Eve", csv_body)
+
+    def test_api_export_users_tsv_contains_tabular_rows(self) -> None:
+        upsert_started_user(self.database_path, 606, "Frank", "frank", self.now)
+
+        tsv_body = _api_export_users_tsv(self.database_path, {})
+
+        self.assertIn("telegram_id\tusername\tfirst_name", tsv_body)
+        self.assertIn("606\tfrank\tFrank", tsv_body)
+
+    def test_api_export_users_xlsx_is_valid_workbook(self) -> None:
+        import zipfile
+        from io import BytesIO
+
+        upsert_started_user(self.database_path, 707, "Grace", "grace", self.now)
+
+        workbook = _api_export_users_xlsx(self.database_path, {})
+
+        with zipfile.ZipFile(BytesIO(workbook)) as archive:
+            self.assertIn("xl/worksheets/sheet1.xml", archive.namelist())
+            sheet = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        self.assertIn("telegram_id", sheet)
+        self.assertIn("grace", sheet)
 
 
 class CrmAuthTests(unittest.TestCase):
