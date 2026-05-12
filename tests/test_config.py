@@ -6,7 +6,14 @@ import unittest
 os.environ.setdefault("BOT_TOKEN", "123:abc")
 os.environ.setdefault("OWNER_CHAT_ID", "123456")
 
-from app.config import parse_bool, resolve_crm_port, resolve_database_path
+from app.config import (
+    is_railway_runtime,
+    parse_bool,
+    resolve_crm_enabled,
+    resolve_crm_host,
+    resolve_crm_port,
+    resolve_database_path,
+)
 
 
 class ConfigParsingTests(unittest.TestCase):
@@ -32,6 +39,33 @@ class ConfigParsingTests(unittest.TestCase):
 
     def test_resolve_crm_port_uses_crm_port_without_railway_port(self) -> None:
         self.assertEqual(resolve_crm_port("", "8080"), 8080)
+
+    def test_is_railway_runtime_detects_railway_env(self) -> None:
+        self.assertTrue(is_railway_runtime("", "production"))
+
+    def test_is_railway_runtime_detects_railway_port(self) -> None:
+        self.assertTrue(is_railway_runtime("12345", ""))
+
+    def test_is_railway_runtime_ignores_local_env(self) -> None:
+        self.assertFalse(is_railway_runtime("", ""))
+
+    def test_resolve_crm_enabled_defaults_on_for_railway(self) -> None:
+        self.assertTrue(resolve_crm_enabled(None, is_railway=True))
+
+    def test_resolve_crm_enabled_defaults_off_locally(self) -> None:
+        self.assertFalse(resolve_crm_enabled(None, is_railway=False))
+
+    def test_resolve_crm_enabled_allows_explicit_false_on_railway(self) -> None:
+        self.assertFalse(resolve_crm_enabled("false", is_railway=True))
+
+    def test_resolve_crm_host_binds_publicly_on_railway(self) -> None:
+        self.assertEqual(resolve_crm_host(None, is_railway=True), "0.0.0.0")
+
+    def test_resolve_crm_host_keeps_loopback_locally(self) -> None:
+        self.assertEqual(resolve_crm_host(None, is_railway=False), "127.0.0.1")
+
+    def test_resolve_crm_host_prefers_explicit_value(self) -> None:
+        self.assertEqual(resolve_crm_host("127.0.0.1", is_railway=True), "127.0.0.1")
 
     def test_resolve_database_path_prefers_explicit_path(self) -> None:
         self.assertEqual(resolve_database_path("custom.sqlite3", "/data"), "custom.sqlite3")

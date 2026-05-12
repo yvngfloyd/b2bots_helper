@@ -59,6 +59,36 @@ def resolve_crm_port(port_env: str | None, crm_port_env: str | None, default: in
     return int(value)
 
 
+def is_railway_runtime(
+    port_env: str | None,
+    railway_environment: str | None,
+    railway_project_id: str | None = None,
+    railway_service_id: str | None = None,
+    railway_public_domain: str | None = None,
+) -> bool:
+    railway_markers = (
+        port_env,
+        railway_environment,
+        railway_project_id,
+        railway_service_id,
+        railway_public_domain,
+    )
+    return any((value or "").strip() for value in railway_markers)
+
+
+def resolve_crm_enabled(crm_enabled_env: str | None, *, is_railway: bool) -> bool:
+    return parse_bool(crm_enabled_env, default=is_railway)
+
+
+def resolve_crm_host(crm_host_env: str | None, *, is_railway: bool) -> str:
+    value = (crm_host_env or "").strip()
+    if value:
+        return value
+    if is_railway:
+        return "0.0.0.0"
+    return "127.0.0.1"
+
+
 def resolve_database_path(
     database_path_env: str | None,
     railway_volume_mount_path: str | None,
@@ -80,6 +110,15 @@ def resolve_database_path(
     return "bot_data.sqlite3"
 
 
+railway_runtime = is_railway_runtime(
+    os.getenv("PORT"),
+    os.getenv("RAILWAY_ENVIRONMENT"),
+    os.getenv("RAILWAY_PROJECT_ID"),
+    os.getenv("RAILWAY_SERVICE_ID"),
+    os.getenv("RAILWAY_PUBLIC_DOMAIN"),
+)
+
+
 settings = Settings(
     bot_token=_get_required_env("BOT_TOKEN"),
     owner_chat_id=int(_get_required_env("OWNER_CHAT_ID")),
@@ -95,8 +134,8 @@ settings = Settings(
     first_reminder_hours=int(os.getenv("FIRST_REMINDER_HOURS", "1")),
     reminder_repeat_days=int(os.getenv("REMINDER_REPEAT_DAYS", "3")),
     reminder_check_seconds=int(os.getenv("REMINDER_CHECK_SECONDS", "300")),
-    crm_enabled=parse_bool(os.getenv("CRM_ENABLED"), default=False),
-    crm_host=os.getenv("CRM_HOST", "").strip() or "127.0.0.1",
+    crm_enabled=resolve_crm_enabled(os.getenv("CRM_ENABLED"), is_railway=railway_runtime),
+    crm_host=resolve_crm_host(os.getenv("CRM_HOST"), is_railway=railway_runtime),
     crm_port=resolve_crm_port(os.getenv("PORT"), os.getenv("CRM_PORT")),
     crm_username=os.getenv("CRM_USERNAME", "").strip(),
     crm_password=os.getenv("CRM_PASSWORD", "").strip(),

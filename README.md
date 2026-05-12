@@ -39,7 +39,7 @@ python main.py
 - `SUBSCRIPTION_CHANNEL_ID` - канал для проверки подписки. Для публичного канала можно указать `@username` или ссылку `https://t.me/...`; для приватного канала нужен числовой id вида `-100...`. Если не заполнить, бот попробует взять `@username` из `TG_CHANNEL_URL`.
 - `BOT_TITLE` - название бота.
 - `COVER_FILE_ID` - необязательно. Когда будет обложка, просто вставь file_id.
-- `DATABASE_PATH` - путь к SQLite-базе для пользователей и напоминаний. Локально по умолчанию `bot_data.sqlite3`. На Railway лучше поставить `DATABASE_PATH=/data/bot_data.sqlite3` и подключить Volume с mount path `/data`; если переменная пустая или равна `bot_data.sqlite3`, бот сам попробует использовать `/data/bot_data.sqlite3`, когда такой mount доступен.
+- `DATABASE_PATH` - путь к SQLite-базе для пользователей и напоминаний. Локально по умолчанию `bot_data.sqlite3`. На Railway поставь `DATABASE_PATH=/data/bot_data.sqlite3` и подключи Volume с mount path `/data`; без Volume Railway может стереть SQLite при рестарте или редеплое.
 - `FIRST_REMINDER_HOURS` - через сколько часов отправлять первое напоминание. По умолчанию `1`.
 - `REMINDER_REPEAT_DAYS` - как часто повторять лёгкие напоминания. По умолчанию `3`.
 - `REMINDER_CHECK_SECONDS` - как часто бот проверяет, кому пора отправить напоминание. По умолчанию `300`.
@@ -80,16 +80,14 @@ http://127.0.0.1:8080
 DATABASE_PATH=/path/to/bot_data.sqlite3 python crm_server.py
 ```
 
-Если бот работает на Railway, локальная CRM на ноутбуке не увидит пользователей из Railway-базы. Чтобы CRM читала ту же базу, что и бот, включи её внутри процесса бота:
+Если бот работает на Railway, локальная CRM на ноутбуке не увидит пользователей из Railway-базы. Открывай CRM на Railway-домене того же сервиса, где запущен бот.
 
 ```text
-CRM_ENABLED=true
-CRM_HOST=0.0.0.0
 CRM_USERNAME=admin
 CRM_PASSWORD=strong-password
 ```
 
-На Railway порт берётся из переменной `PORT` автоматически. `CRM_USERNAME` и `CRM_PASSWORD` лучше заполнить обязательно, потому что CRM будет доступна по публичному URL сервиса.
+На Railway CRM включается автоматически и слушает публичный порт из переменной `PORT`. `CRM_ENABLED` и `CRM_HOST` можно не задавать. Если они уже есть в Railway Variables, не ставь `CRM_ENABLED=false` и не ставь `CRM_HOST=127.0.0.1`, иначе ты вручную выключишь публичную CRM. `CRM_USERNAME` и `CRM_PASSWORD` лучше заполнить обязательно, потому что CRM будет доступна по публичному URL сервиса.
 
 Страница CRM сама опрашивает API каждые 7 секунд, поэтому новые пользователи появляются без ручного обновления. Доступные endpoints:
 
@@ -110,8 +108,10 @@ GET /api/users/export.list.txt
 
 1. Создай Volume в Railway и подключи его к сервису бота.
 2. Mount path поставь, например, `/data`.
-3. Поставь `DATABASE_PATH=/data/bot_data.sqlite3`. Если забудешь или оставишь `bot_data.sqlite3`, бот всё равно попробует выбрать `/data/bot_data.sqlite3`, когда mount `/data` доступен.
-4. После редеплоя в `/debug` должно быть видно `Database path: /data/bot_data.sqlite3`.
+3. Поставь `DATABASE_PATH=/data/bot_data.sqlite3`.
+4. Удали из Railway Variables старые локальные значения `CRM_ENABLED=false` и `CRM_HOST=127.0.0.1`, если они есть.
+5. После редеплоя открой CRM на Railway-домене, а не на `127.0.0.1`.
+6. В `/debug` должно быть видно `Database path: /data/bot_data.sqlite3`.
 
 Если хочешь задать путь руками, поставь:
 
