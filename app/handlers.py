@@ -34,49 +34,49 @@ QUESTIONS: list[dict[str, Any]] = [
     {
         "state": LeadForm.business_type,
         "key": "business_type",
-        "question": "1/9. Чем вы занимаетесь?",
+        "question": "1/8. Чем вы занимаетесь?",
         "options": final_business_types,
         "prefix": "business_type",
     },
     {
         "state": LeadForm.lead_source,
         "key": "lead_source",
-        "question": "2/9. Откуда вам чаще всего пишут клиенты?",
+        "question": "2/8. Откуда вам чаще всего пишут клиенты?",
         "options": lead_sources,
         "prefix": "lead_source",
     },
     {
         "state": LeadForm.current_problem,
         "key": "current_problem",
-        "question": "3/9. Что сейчас происходит с заявками?",
+        "question": "3/8. Что сейчас происходит с заявками?",
         "options": current_problems,
         "prefix": "current_problem",
     },
     {
         "state": LeadForm.main_goal,
         "key": "main_goal",
-        "question": "4/9. Что вам важнее всего?",
+        "question": "4/8. Что вам важнее всего?",
         "options": main_goals,
         "prefix": "main_goal",
     },
     {
         "state": LeadForm.integration_need,
         "key": "integration_need",
-        "question": "5/9. Нужна ли интеграция с менеджером или CRM?",
+        "question": "5/8. Нужна ли интеграция с менеджером или CRM?",
         "options": integration_needs,
         "prefix": "integration_need",
     },
     {
         "state": LeadForm.launch_time,
         "key": "launch_time",
-        "question": "6/9. Когда хотите запустить?",
+        "question": "6/8. Когда хотите запустить?",
         "options": launch_times,
         "prefix": "launch_time",
     },
     {
         "state": LeadForm.budget,
         "key": "budget",
-        "question": "7/9. Какой бюджет рассматриваете?",
+        "question": "7/8. Готовы ли выделить бюджет?",
         "options": budgets,
         "prefix": "budget",
     },
@@ -90,7 +90,6 @@ FIELD_TITLES = {
     "integration_need": "Интеграция / CRM",
     "launch_time": "Срок запуска",
     "budget": "Бюджет",
-    "task_description": "Что должен делать бот",
     "contact": "Контакт",
 }
 
@@ -303,14 +302,13 @@ async def go_back(callback: CallbackQuery, state: FSMContext) -> None:
         return
 
     if current_state == LeadForm.contact_method.state:
-        await state.set_state(LeadForm.task_description)
-        await save_current_form_snapshot(
+        await ask_question(
             callback.message,
             state,
-            "task_description",
+            len(QUESTIONS) - 1,
+            edit=_can_edit_text(callback.message),
             user_id=callback.from_user.id,
         )
-        await callback.message.edit_text("8/9. Коротко опишите, что бот должен делать")
         await callback.answer()
         return
 
@@ -323,7 +321,7 @@ async def go_back(callback: CallbackQuery, state: FSMContext) -> None:
             user_id=callback.from_user.id,
         )
         await callback.message.edit_text(
-            "9/9. Как удобно с вами связаться?",
+            "8/8. Как удобно с вами связаться?",
             reply_markup=make_choice_keyboard("contact_method", contact_methods, back=True),
         )
         await callback.answer()
@@ -380,14 +378,17 @@ async def process_choice(callback: CallbackQuery, state: FSMContext) -> None:
             user_id=callback.from_user.id,
         )
     else:
-        await state.set_state(LeadForm.task_description)
+        await state.set_state(LeadForm.contact_method)
         await save_current_form_snapshot(
             callback.message,
             state,
-            "task_description",
+            "contact_method",
             user_id=callback.from_user.id,
         )
-        await callback.message.edit_text("8/9. Коротко опишите, что бот должен делать")
+        await callback.message.edit_text(
+            "8/8. Как удобно с вами связаться?",
+            reply_markup=make_choice_keyboard("contact_method", contact_methods, back=True),
+        )
 
     await callback.answer()
 
@@ -395,16 +396,10 @@ async def process_choice(callback: CallbackQuery, state: FSMContext) -> None:
 @router.message(LeadForm.task_description)
 async def process_task_description(message: Message, state: FSMContext) -> None:
     await track_message_user(message, source="form")
-    text = (message.text or "").strip()
-    if len(text) < 5:
-        await message.answer("Пожалуйста, напишите чуть подробнее, хотя бы в 5 символов")
-        return
-
-    await state.update_data(task_description=text)
     await state.set_state(LeadForm.contact_method)
     await save_current_form_snapshot(message, state, "contact_method")
     await message.answer(
-        "9/9. Как удобно с вами связаться?",
+        "8/8. Как удобно с вами связаться?",
         reply_markup=make_choice_keyboard("contact_method", contact_methods, back=True),
     )
 
@@ -415,22 +410,10 @@ async def process_contact_method(callback: CallbackQuery, state: FSMContext) -> 
     _, raw_index = callback.data.split(":", 1)
     answer = contact_methods[int(raw_index) - 1]
 
-    if answer == "Подставить мой username":
+    if answer == "Оставить свой user":
         username = callback.from_user.username
         contact = f"@{username}" if username else "Username не указан"
         await finalize_application(callback.message, state, contact, user=callback.from_user)
-        await callback.answer()
-        return
-
-    if answer == "Написать телефон вручную":
-        await state.set_state(LeadForm.manual_contact)
-        await save_current_form_snapshot(
-            callback.message,
-            state,
-            "manual_contact",
-            user_id=callback.from_user.id,
-        )
-        await callback.message.edit_text("Напишите ваш телефон одним сообщением")
         await callback.answer()
         return
 
@@ -442,7 +425,7 @@ async def process_contact_method(callback: CallbackQuery, state: FSMContext) -> 
         user_id=callback.from_user.id,
     )
     await callback.message.edit_text(
-        "Напишите ваш username, Telegram-ссылку или другой удобный контакт одним сообщением"
+        "Напишите ваш username, Telegram-ссылку, телефон или другой удобный контакт одним сообщением"
     )
     await callback.answer()
 
@@ -479,7 +462,6 @@ async def finalize_application(message: Message, state: FSMContext, contact: str
         f"<b>{FIELD_TITLES['integration_need']}:</b> {data.get('integration_need', '-')}\n"
         f"<b>{FIELD_TITLES['launch_time']}:</b> {data.get('launch_time', '-')}\n"
         f"<b>{FIELD_TITLES['budget']}:</b> {data.get('budget', '-')}\n\n"
-        f"<b>{FIELD_TITLES['task_description']}:</b>\n{data.get('task_description', '-')}\n\n"
         f"<b>{FIELD_TITLES['contact']}:</b> {contact}"
     )
 
@@ -615,16 +597,19 @@ async def show_saved_step(message: Message, state: FSMContext, current_step: str
         return
 
     if current_step == "task_description":
-        await state.set_state(LeadForm.task_description)
-        await save_current_form_snapshot(message, state, "task_description", user_id=user_id)
-        await message.answer("8/9. Коротко опишите, что бот должен делать")
+        await state.set_state(LeadForm.contact_method)
+        await save_current_form_snapshot(message, state, "contact_method", user_id=user_id)
+        await message.answer(
+            "8/8. Как удобно с вами связаться?",
+            reply_markup=make_choice_keyboard("contact_method", contact_methods, back=True),
+        )
         return
 
     if current_step == "contact_method":
         await state.set_state(LeadForm.contact_method)
         await save_current_form_snapshot(message, state, "contact_method", user_id=user_id)
         await message.answer(
-            "9/9. Как удобно с вами связаться?",
+            "8/8. Как удобно с вами связаться?",
             reply_markup=make_choice_keyboard("contact_method", contact_methods, back=True),
         )
         return
@@ -632,7 +617,9 @@ async def show_saved_step(message: Message, state: FSMContext, current_step: str
     if current_step == "manual_contact":
         await state.set_state(LeadForm.manual_contact)
         await save_current_form_snapshot(message, state, "manual_contact", user_id=user_id)
-        await message.answer("Напишите ваш username, Telegram-ссылку или другой удобный контакт одним сообщением")
+        await message.answer(
+            "Напишите ваш username, Telegram-ссылку, телефон или другой удобный контакт одним сообщением"
+        )
         return
 
     await state.clear()
