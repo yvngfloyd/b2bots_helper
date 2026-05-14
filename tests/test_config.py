@@ -12,6 +12,7 @@ from app.config import (
     resolve_crm_enabled,
     resolve_crm_host,
     resolve_crm_port,
+    resolve_database_location,
     resolve_database_path,
 )
 
@@ -93,6 +94,27 @@ class ConfigParsingTests(unittest.TestCase):
 
     def test_resolve_database_path_falls_back_to_local_sqlite(self) -> None:
         self.assertEqual(resolve_database_path("", ""), "bot_data.sqlite3")
+
+    def test_resolve_database_location_prefers_database_url(self) -> None:
+        self.assertEqual(
+            resolve_database_location(
+                "postgresql://user:pass@host:5432/db",
+                "/data/bot_data.sqlite3",
+                "/data",
+            ),
+            "postgresql://user:pass@host:5432/db",
+        )
+
+    def test_resolve_database_location_falls_back_to_sqlite_path(self) -> None:
+        self.assertEqual(
+            resolve_database_location(
+                "",
+                "",
+                "/data",
+                data_mount_exists=lambda path: False,
+            ),
+            "/data/bot_data.sqlite3",
+        )
 
     def test_settings_reads_admin_token(self) -> None:
         from app.config import Settings

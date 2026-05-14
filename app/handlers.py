@@ -23,7 +23,14 @@ from app.keyboards import (
     subscription_required_keyboard,
 )
 from app.states import LeadForm
-from app.storage import count_users, get_form_snapshot, mark_completed, save_form_snapshot, upsert_started_user
+from app.storage import (
+    count_users,
+    display_database_location,
+    get_form_snapshot,
+    mark_completed,
+    save_form_snapshot,
+    upsert_started_user,
+)
 from app.subscription import SubscriptionCheckStatus, check_user_subscription, resolve_subscription_chat_id
 from app.tracking import track_callback_user, track_message_user
 
@@ -125,7 +132,7 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         logger.info(
             "Saved /start user_id=%s database_path=%s users_count=%s",
             message.from_user.id,
-            settings.database_path,
+            display_database_location(settings.database_path),
             safe_count_users(),
         )
         await notify_owner_about_start(message, message.from_user)
@@ -540,7 +547,7 @@ def build_start_owner_notification(user: User, *, database_path: str, users_coun
         f"<b>Username:</b> {escape(username)}\n"
         f"<b>User ID:</b> <code>{user.id}</code>\n\n"
         f"<b>CRM users:</b> <code>{users_count}</code>\n"
-        f"<b>DB:</b> <code>{escape(database_path)}</code>"
+        f"<b>DB:</b> <code>{escape(display_database_location(database_path))}</code>"
     )
 
 

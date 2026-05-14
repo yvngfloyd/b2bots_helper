@@ -9,7 +9,7 @@ from aiogram.enums import ParseMode
 from app.config import settings
 from app.handlers import router
 from app.reminders import reminder_worker
-from app.storage import initialize_database
+from app.storage import database_backend_name, display_database_location, initialize_database
 from crm_server import start_crm_server
 
 
@@ -25,7 +25,11 @@ async def main() -> None:
     dp.include_router(router)
 
     initialize_database(settings.database_path)
-    logging.info("SQLite database path: %s", settings.database_path)
+    logging.info(
+        "Database backend=%s location=%s",
+        database_backend_name(settings.database_path),
+        display_database_location(settings.database_path),
+    )
     crm_server = None
     if settings.crm_enabled:
         crm_server = start_crm_server(

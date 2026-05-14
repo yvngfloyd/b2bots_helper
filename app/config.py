@@ -110,6 +110,23 @@ def resolve_database_path(
     return "bot_data.sqlite3"
 
 
+def resolve_database_location(
+    database_url_env: str | None,
+    database_path_env: str | None,
+    railway_volume_mount_path: str | None,
+    *,
+    data_mount_exists: Callable[[str], bool] = os.path.isdir,
+) -> str:
+    database_url = (database_url_env or "").strip()
+    if database_url:
+        return database_url
+    return resolve_database_path(
+        database_path_env,
+        railway_volume_mount_path,
+        data_mount_exists=data_mount_exists,
+    )
+
+
 railway_runtime = is_railway_runtime(
     os.getenv("PORT"),
     os.getenv("RAILWAY_ENVIRONMENT"),
@@ -127,7 +144,8 @@ settings = Settings(
     require_subscription=parse_bool(os.getenv("REQUIRE_SUBSCRIPTION"), default=False),
     subscription_channel_id=os.getenv("SUBSCRIPTION_CHANNEL_ID", "").strip(),
     cover_file_id=os.getenv("COVER_FILE_ID", "").strip(),
-    database_path=resolve_database_path(
+    database_path=resolve_database_location(
+        os.getenv("DATABASE_URL"),
         os.getenv("DATABASE_PATH"),
         os.getenv("RAILWAY_VOLUME_MOUNT_PATH"),
     ),

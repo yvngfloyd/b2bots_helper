@@ -44,8 +44,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--database",
-        default=os.getenv("DATABASE_PATH", DEFAULT_DATABASE_PATH),
-        help=f"SQLite database path. Default: {DEFAULT_DATABASE_PATH}",
+        default=os.getenv("DATABASE_URL", "").strip() or os.getenv("DATABASE_PATH", DEFAULT_DATABASE_PATH),
+        help=f"Database URL or SQLite path. Default: {DEFAULT_DATABASE_PATH}",
     )
     parser.add_argument(
         "--username",

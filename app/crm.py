@@ -9,6 +9,8 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
+from app.storage import _connect, _first_value, _is_postgres_database, database_backend_name, display_database_location
+
 
 @dataclass(frozen=True)
 class CrmUser:
@@ -372,7 +374,7 @@ def render_crm_html(users: list[CrmUser], database_path: str) -> str:
   <header>
     <div>
       <h1>B2Bots CRM</h1>
-      <div class="meta">База: {escape(Path(database_path).name)} · автообновление каждые 7 секунд</div>
+      <div class="meta">База: {escape(database_backend_name(database_path))} · автообновление каждые 7 секунд</div>
       <div class="actions">
         <a class="action-link action-link-primary" href="/self-test">Тест записи</a>
         <a class="action-link" href="/debug">Диагностика</a>
@@ -711,6 +713,9 @@ def _render_crm_script() -> str:
 
 
 def _render_runtime_notice(database_path: str) -> str:
+    if _is_postgres_database(database_path):
+        return ""
+
     if os.getenv("RAILWAY_ENVIRONMENT", "").strip() and not str(database_path).startswith("/data/"):
         return (
             '<div class="notice">'
@@ -735,18 +740,19 @@ def _render_runtime_notice(database_path: str) -> str:
 
 
 def render_crm_debug_html(database_path: str) -> str:
-    path = Path(database_path)
-    absolute_path = path.resolve()
-    exists = path.exists()
-    size = path.stat().st_size if exists else 0
+    is_postgres = _is_postgres_database(database_path)
+    path = None if is_postgres else Path(database_path)
+    absolute_path = "PostgreSQL DATABASE_URL" if is_postgres else str(path.resolve())
+    exists = True if is_postgres else path.exists()
+    size = "external" if is_postgres else path.stat().st_size if path.exists() else 0
     user_count = 0
-    latest_rows: list[sqlite3.Row] = []
+    latest_rows: list[Any] = []
     error = ""
 
     try:
         with _connect(database_path) as connection:
             _ensure_application_data_column(connection)
-            user_count = int(connection.execute("SELECT COUNT(*) FROM users").fetchone()[0])
+            user_count = int(_first_value(connection.execute("SELECT COUNT(*) FROM users").fetchone()))
             latest_rows = connection.execute(
                 """
                 SELECT user_id, full_name, username, started_at, updated_at, completed_at
@@ -790,7 +796,8 @@ def render_crm_debug_html(database_path: str) -> str:
 </head>
 <body>
   <h1>CRM Debug</h1>
-  <p><b>Database path:</b> <code>{escape(database_path)}</code></p>
+  <p><b>Database backend:</b> <code>{escape(database_backend_name(database_path))}</code></p>
+  <p><b>Database path:</b> <code>{escape(display_database_location(database_path))}</code></p>
   <p><b>Absolute path:</b> <code>{escape(str(absolute_path))}</code></p>
   <p><b>Current working directory:</b> <code>{escape(os.getcwd())}</code></p>
   <p><b>Exists:</b> {exists}</p>
@@ -883,13 +890,11 @@ def _clean(value: Any) -> str:
     return "" if value is None else str(value)
 
 
-def _connect(database_path: str) -> sqlite3.Connection:
-    connection = sqlite3.connect(database_path)
-    connection.row_factory = sqlite3.Row
-    return connection
+def _ensure_application_data_column(connection: Any) -> None:
+    if getattr(connection, "is_postgres", False):
+        connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS application_data_json TEXT")
+        return
 
-
-def _ensure_application_data_column(connection: sqlite3.Connection) -> None:
     columns = {
         row["name"]
         for row in connection.execute("PRAGMA table_info(users)").fetchall()

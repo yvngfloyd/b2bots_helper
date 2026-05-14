@@ -72,7 +72,7 @@ class CrmTests(unittest.TestCase):
         self.assertIn("<table", html)
         self.assertIn("&lt;Alice&gt;", html)
         self.assertIn("Всего пользователей: 1", html)
-        self.assertIn("bot.sqlite3", html)
+        self.assertIn("База: SQLite", html)
         self.assertIn("/debug", html)
         self.assertIn("/self-test", html)
         self.assertIn("/api/users", html)

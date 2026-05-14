@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -74,6 +75,10 @@ class UserListResult:
 
 
 def initialize_database(database_path: str) -> None:
+    if _is_postgres_database(database_path):
+        _initialize_postgres_database(database_path)
+        return
+
     path = Path(database_path)
     if path.parent != Path("."):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -494,7 +499,7 @@ def list_users(
     safe_offset = max(0, int(offset))
 
     with _connect(database_path) as connection:
-        total = int(connection.execute(f"SELECT COUNT(*) FROM users {where_sql}", params).fetchone()[0])
+        total = int(_first_value(connection.execute(f"SELECT COUNT(*) FROM users {where_sql}", params).fetchone()))
         rows = connection.execute(
             f"""
             SELECT *
@@ -560,27 +565,33 @@ def get_user_stats(database_path: str, now: datetime | None = None) -> dict[str,
     today_start = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
     seven_days_ago = current_time - timedelta(days=7)
     with _connect(database_path) as connection:
-        total = int(connection.execute("SELECT COUNT(*) FROM users").fetchone()[0])
+        total = int(_first_value(connection.execute("SELECT COUNT(*) FROM users").fetchone()))
         counts = {
             status: int(
-                connection.execute(
-                    "SELECT COUNT(*) FROM users WHERE application_status = ?",
-                    (status,),
-                ).fetchone()[0]
+                _first_value(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM users WHERE application_status = ?",
+                        (status,),
+                    ).fetchone()
+                )
             )
             for status in APPLICATION_STATUSES
         }
         users_today = int(
-            connection.execute(
-                "SELECT COUNT(*) FROM users WHERE first_seen_at >= ?",
-                (_serialize(today_start),),
-            ).fetchone()[0]
+            _first_value(
+                connection.execute(
+                    "SELECT COUNT(*) FROM users WHERE first_seen_at >= ?",
+                    (_serialize(today_start),),
+                ).fetchone()
+            )
         )
         users_last_7_days = int(
-            connection.execute(
-                "SELECT COUNT(*) FROM users WHERE first_seen_at >= ?",
-                (_serialize(seven_days_ago),),
-            ).fetchone()[0]
+            _first_value(
+                connection.execute(
+                    "SELECT COUNT(*) FROM users WHERE first_seen_at >= ?",
+                    (_serialize(seven_days_ago),),
+                ).fetchone()
+            )
         )
 
     completed = counts.get("completed", 0)
@@ -601,7 +612,7 @@ def get_user_stats(database_path: str, now: datetime | None = None) -> dict[str,
 def count_users(database_path: str) -> int:
     with _connect(database_path) as connection:
         row = connection.execute("SELECT COUNT(*) FROM users").fetchone()
-    return int(row[0])
+    return int(_first_value(row))
 
 
 def _build_user_filters(
@@ -641,12 +652,108 @@ def _build_user_filters(
 
 
 def _connect(database_path: str) -> sqlite3.Connection:
+    if _is_postgres_database(database_path):
+        return _PostgresConnection(database_path)
     connection = sqlite3.connect(database_path)
     connection.row_factory = sqlite3.Row
     return connection
 
 
-def _ensure_tracking_columns(connection: sqlite3.Connection) -> None:
+class _PostgresConnection:
+    is_postgres = True
+
+    def __init__(self, database_url: str) -> None:
+        try:
+            import psycopg
+            from psycopg.rows import dict_row
+        except ImportError as exc:
+            raise RuntimeError(
+                "PostgreSQL storage requires the psycopg package. "
+                "Install dependencies from requirements.txt and set DATABASE_URL again."
+            ) from exc
+
+        self._connection = psycopg.connect(database_url, row_factory=dict_row)
+
+    def __enter__(self) -> "_PostgresConnection":
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        if exc_type is None:
+            self._connection.commit()
+        else:
+            self._connection.rollback()
+        self._connection.close()
+
+    def execute(self, sql: str, params: Sequence[Any] | None = None) -> Any:
+        return self._connection.execute(_postgres_sql(sql), tuple(params or ()))
+
+
+def _postgres_sql(sql: str) -> str:
+    return sql.replace("?", "%s")
+
+
+def _is_postgres_database(database_path: str) -> bool:
+    normalized = database_path.strip().lower()
+    return normalized.startswith("postgres://") or normalized.startswith("postgresql://")
+
+
+def database_backend_name(database_path: str) -> str:
+    return "PostgreSQL" if _is_postgres_database(database_path) else "SQLite"
+
+
+def display_database_location(database_path: str) -> str:
+    if not _is_postgres_database(database_path):
+        return database_path
+    scheme, _, rest = database_path.partition("://")
+    if "@" not in rest:
+        return f"{scheme}://***"
+    _, _, host_part = rest.partition("@")
+    return f"{scheme}://***@{host_part}"
+
+
+def _initialize_postgres_database(database_url: str) -> None:
+    with _connect(database_url) as connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                user_id BIGINT PRIMARY KEY,
+                full_name TEXT NOT NULL DEFAULT '',
+                username TEXT NOT NULL DEFAULT '',
+                started_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT,
+                first_reminder_sent_at TEXT,
+                last_reminder_sent_at TEXT,
+                reminder_count INTEGER NOT NULL DEFAULT 0,
+                current_step TEXT,
+                form_data_json TEXT,
+                application_data_json TEXT,
+                telegram_id BIGINT,
+                first_name TEXT,
+                last_name TEXT,
+                language_code TEXT,
+                phone TEXT,
+                source TEXT,
+                first_seen_at TEXT,
+                last_seen_at TEXT,
+                last_message_text TEXT,
+                application_status TEXT NOT NULL DEFAULT 'new',
+                is_application_completed INTEGER NOT NULL DEFAULT 0,
+                answers_json TEXT,
+                last_reminder_at TEXT,
+                is_blocked INTEGER NOT NULL DEFAULT 0,
+                notes TEXT,
+                created_at TEXT,
+                updated_at_v2 TEXT
+            )
+            """
+        )
+        _ensure_tracking_columns(connection)
+        _backfill_tracking_columns(connection)
+        _ensure_indexes(connection)
+
+
+def _ensure_tracking_columns(connection: sqlite3.Connection | _PostgresConnection) -> None:
     _ensure_column(connection, "users", "current_step", "TEXT")
     _ensure_column(connection, "users", "form_data_json", "TEXT")
     _ensure_column(connection, "users", "application_data_json", "TEXT")
@@ -713,11 +820,17 @@ def _ensure_indexes(connection: sqlite3.Connection) -> None:
 
 
 def _ensure_column(
-    connection: sqlite3.Connection,
+    connection: sqlite3.Connection | _PostgresConnection,
     table_name: str,
     column_name: str,
     column_definition: str,
 ) -> None:
+    if getattr(connection, "is_postgres", False):
+        connection.execute(
+            f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {column_name} {column_definition}"
+        )
+        return
+
     columns = {
         row["name"]
         for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
@@ -771,6 +884,12 @@ def _parse_json(value: Any) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def _first_value(row: Any) -> Any:
+    if isinstance(row, dict):
+        return next(iter(row.values()))
+    return row[0]
 
 
 def _validate_status(status: str) -> None:

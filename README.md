@@ -39,7 +39,8 @@ python main.py
 - `SUBSCRIPTION_CHANNEL_ID` - канал для проверки подписки. Для публичного канала можно указать `@username` или ссылку `https://t.me/...`; для приватного канала нужен числовой id вида `-100...`. Если не заполнить, бот попробует взять `@username` из `TG_CHANNEL_URL`.
 - `BOT_TITLE` - название бота.
 - `COVER_FILE_ID` - необязательно. Когда будет обложка, просто вставь file_id.
-- `DATABASE_PATH` - путь к SQLite-базе для пользователей и напоминаний. Локально по умолчанию `bot_data.sqlite3`. На Railway поставь `DATABASE_PATH=/data/bot_data.sqlite3` и подключи Volume с mount path `/data`; без Volume Railway может стереть SQLite при рестарте или редеплое.
+- `DATABASE_URL` - рекомендуемый продакшен-вариант для Railway Postgres. Если переменная заполнена, бот и CRM используют Postgres и не зависят от SQLite-файла.
+- `DATABASE_PATH` - локальный/fallback путь к SQLite-базе. Локально по умолчанию `bot_data.sqlite3`. Используй только если не подключаешь Postgres.
 - `FIRST_REMINDER_HOURS` - через сколько часов отправлять первое напоминание. По умолчанию `1`.
 - `REMINDER_REPEAT_DAYS` - как часто повторять лёгкие напоминания. По умолчанию `3`.
 - `REMINDER_CHECK_SECONDS` - как часто бот проверяет, кому пора отправить напоминание. По умолчанию `300`.
@@ -74,7 +75,7 @@ python crm_server.py
 http://127.0.0.1:8080
 ```
 
-Если база лежит в другом месте:
+Если SQLite-база лежит в другом месте:
 
 ```bash
 DATABASE_PATH=/path/to/bot_data.sqlite3 python crm_server.py
@@ -104,16 +105,16 @@ GET /api/users/export.list.txt
 
 `PATCH /api/users/{telegram_id}` принимает `application_status`, `notes` и `is_blocked`. Если задан `ADMIN_TOKEN`, API принимает заголовок `Authorization: Bearer <ADMIN_TOKEN>`. Для обычного открытия страницы в браузере на Railway оставь включёнными `CRM_USERNAME` и `CRM_PASSWORD`.
 
-Чтобы база не терялась и точно была подключена к Railway-боту:
+Рекомендуемый способ, чтобы база не терялась:
 
-1. Создай Volume в Railway и подключи его к сервису бота.
-2. Mount path поставь, например, `/data`.
-3. Поставь `DATABASE_PATH=/data/bot_data.sqlite3`.
-4. Удали из Railway Variables старые локальные значения `CRM_ENABLED=false` и `CRM_HOST=127.0.0.1`, если они есть.
+1. Добавь Railway Postgres к проекту.
+2. В сервисе бота должна появиться переменная `DATABASE_URL`. Если Railway не прокинул её сам, добавь reference на Postgres вручную.
+3. Удали `DATABASE_PATH`, если он указывал на локальный/SQLite-файл.
+4. Удали старые локальные значения `CRM_ENABLED=false` и `CRM_HOST=127.0.0.1`, если они есть.
 5. После редеплоя открой CRM на Railway-домене, а не на `127.0.0.1`.
-6. В `/debug` должно быть видно `Database path: /data/bot_data.sqlite3`.
+6. В `/debug` должно быть видно `Database backend: PostgreSQL`.
 
-Если хочешь задать путь руками, поставь:
+SQLite через Volume всё ещё поддерживается как запасной вариант, но Postgres надёжнее для продакшена. Если всё-таки используешь SQLite, поставь:
 
 ```text
 DATABASE_PATH=/data/bot_data.sqlite3
@@ -121,7 +122,7 @@ DATABASE_PATH=/data/bot_data.sqlite3
 
 Главное: Start Command сервиса должен быть `python main.py`. В репозитории есть `railway.json`, который задаёт это автоматически для новых деплоев.
 
-Если CRM открывается, но таблица пустая после `/start`, открой `/debug` на том же домене. Там будет путь к SQLite-файлу, размер базы, количество строк и последние пользователи. В Railway Logs после каждого `/start` также должна появиться строка `Saved /start user_id=... database_path=... users_count=...`. Если этой строки нет, `/start` обрабатывает другой запущенный экземпляр бота.
+Если CRM открывается, но таблица пустая после `/start`, открой `/debug` на том же домене. Там будет backend базы, количество строк и последние пользователи. В Railway Logs после каждого `/start` также должна появиться строка `Saved /start user_id=... database_path=... users_count=...`. Если этой строки нет, `/start` обрабатывает другой запущенный экземпляр бота.
 
 ## Деплой
 

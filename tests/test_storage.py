@@ -8,7 +8,12 @@ from types import SimpleNamespace
 
 from app.storage import (
     APPLICATION_STATUSES,
+    _is_postgres_database,
+    _first_value,
+    _postgres_sql,
     count_users,
+    database_backend_name,
+    display_database_location,
     get_application_data,
     get_form_snapshot,
     get_due_reminders,
@@ -25,6 +30,33 @@ from app.storage import (
     upsert_started_user,
     upsert_user_from_telegram,
 )
+
+
+class DatabaseBackendTests(unittest.TestCase):
+    def test_detects_postgres_database_urls(self) -> None:
+        self.assertTrue(_is_postgres_database("postgres://user:pass@host/db"))
+        self.assertTrue(_is_postgres_database("postgresql://user:pass@host/db"))
+        self.assertFalse(_is_postgres_database("bot_data.sqlite3"))
+
+    def test_translates_sqlite_placeholders_for_postgres(self) -> None:
+        self.assertEqual(
+            _postgres_sql("SELECT * FROM users WHERE user_id = ? AND username = ?"),
+            "SELECT * FROM users WHERE user_id = %s AND username = %s",
+        )
+
+    def test_displays_postgres_location_without_password(self) -> None:
+        self.assertEqual(
+            display_database_location("postgresql://user:secret@host.railway.internal:5432/railway"),
+            "postgresql://***@host.railway.internal:5432/railway",
+        )
+
+    def test_database_backend_name_describes_selected_backend(self) -> None:
+        self.assertEqual(database_backend_name("postgresql://user:secret@host/db"), "PostgreSQL")
+        self.assertEqual(database_backend_name("bot_data.sqlite3"), "SQLite")
+
+    def test_first_value_supports_dict_rows_and_tuple_rows(self) -> None:
+        self.assertEqual(_first_value({"count": 3}), 3)
+        self.assertEqual(_first_value((4,)), 4)
 
 
 class StorageReminderTests(unittest.TestCase):
