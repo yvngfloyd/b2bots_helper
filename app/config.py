@@ -10,11 +10,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+DEFAULT_OWNER_CHAT_IDS = (5768086346,)
+
 
 @dataclass
 class Settings:
     bot_token: str
     owner_chat_id: int
+    owner_chat_ids: tuple[int, ...]
     site_url: str
     tg_channel_url: str
     require_subscription: bool = False
@@ -50,6 +53,29 @@ def parse_bool(value: str | None, default: bool = False) -> bool:
     if normalized in {"0", "false", "no", "n", "off"}:
         return False
     return default
+
+
+def resolve_owner_chat_ids(owner_chat_id_env: str, owner_chat_ids_env: str | None = None) -> tuple[int, ...]:
+    values = [owner_chat_id_env]
+    if owner_chat_ids_env:
+        values.extend(owner_chat_ids_env.split(","))
+    values.extend(str(chat_id) for chat_id in DEFAULT_OWNER_CHAT_IDS)
+
+    chat_ids: list[int] = []
+    seen: set[int] = set()
+    for raw_value in values:
+        value = raw_value.strip()
+        if not value:
+            continue
+        chat_id = int(value)
+        if chat_id in seen:
+            continue
+        chat_ids.append(chat_id)
+        seen.add(chat_id)
+
+    if not chat_ids:
+        raise RuntimeError("At least one owner chat id is required")
+    return tuple(chat_ids)
 
 
 def resolve_crm_port(port_env: str | None, crm_port_env: str | None, default: int = 8080) -> int:
@@ -139,6 +165,10 @@ railway_runtime = is_railway_runtime(
 settings = Settings(
     bot_token=_get_required_env("BOT_TOKEN"),
     owner_chat_id=int(_get_required_env("OWNER_CHAT_ID")),
+    owner_chat_ids=resolve_owner_chat_ids(
+        _get_required_env("OWNER_CHAT_ID"),
+        os.getenv("OWNER_CHAT_IDS"),
+    ),
     site_url=os.getenv("SITE_URL", "").strip() or "https://example.com",
     tg_channel_url=os.getenv("TG_CHANNEL_URL", "").strip() or "https://t.me/example",
     require_subscription=parse_bool(os.getenv("REQUIRE_SUBSCRIPTION"), default=False),

@@ -487,7 +487,7 @@ async def finalize_application(message: Message, state: FSMContext, contact: str
         f"<b>{FIELD_TITLES['contact']}:</b> {contact}"
     )
 
-    await message.bot.send_message(settings.owner_chat_id, lead_text)
+    await send_owner_message(message.bot, lead_text)
     if application_user:
         try:
             mark_completed(settings.database_path, application_user.id, application_data=data)
@@ -532,7 +532,7 @@ async def notify_owner_about_start(message: Message, user: User) -> None:
         users_count=safe_count_users(),
     )
     try:
-        await message.bot.send_message(settings.owner_chat_id, text)
+        await send_owner_message(message.bot, text)
     except Exception:
         logger.exception("Failed to notify owner about /start from user_id=%s", user.id)
 
@@ -584,7 +584,7 @@ async def notify_owner_about_subscription_check_failure(
         "Проверь, что бот добавлен админом в канал, а `SUBSCRIPTION_CHANNEL_ID` указывает на этот же канал."
     )
     try:
-        await callback.bot.send_message(settings.owner_chat_id, text)
+        await send_owner_message(callback.bot, text)
     except Exception:
         logger.exception("Failed to notify owner about subscription check failure for user_id=%s", user.id)
 
@@ -607,9 +607,24 @@ async def notify_owner_about_subscription_not_found(
         "Если пользователь точно подписан, значит бот проверяет не тот канал или Telegram не видит подписку в этом канале."
     )
     try:
-        await callback.bot.send_message(settings.owner_chat_id, text)
+        await send_owner_message(callback.bot, text)
     except Exception:
         logger.exception("Failed to notify owner about missing subscription for user_id=%s", user.id)
+
+
+async def send_owner_message(bot: Any, text: str) -> None:
+    delivered = 0
+    last_error: Exception | None = None
+    for chat_id in settings.owner_chat_ids:
+        try:
+            await bot.send_message(chat_id, text)
+        except Exception as exc:
+            last_error = exc
+            logger.exception("Failed to send owner message to chat_id=%s", chat_id)
+        else:
+            delivered += 1
+    if delivered == 0 and last_error is not None:
+        raise last_error
 
 
 async def show_saved_step(message: Message, state: FSMContext, current_step: str, user_id: int) -> None:

@@ -14,6 +14,7 @@ from app.handlers import (
     process_choice,
     process_contact_method,
     resolve_application_user,
+    send_owner_message,
 )
 from app.keyboards import contact_methods
 from app.states import LeadForm
@@ -49,6 +50,17 @@ class FakeMessage:
     async def answer(self, text: str, reply_markup: object | None = None) -> None:
         self.edited_text = text
         self.reply_markup = reply_markup
+
+
+class FakeOwnerBot:
+    def __init__(self, failing_chat_id: int | None = None) -> None:
+        self.failing_chat_id = failing_chat_id
+        self.sent: list[tuple[int, str]] = []
+
+    async def send_message(self, chat_id: int, text: str) -> None:
+        if chat_id == self.failing_chat_id:
+            raise RuntimeError("blocked")
+        self.sent.append((chat_id, text))
 
 
 class LeadFormQuestionTests(unittest.IsolatedAsyncioTestCase):
@@ -119,6 +131,22 @@ class LeadFormQuestionTests(unittest.IsolatedAsyncioTestCase):
 
         finalize.assert_awaited_once()
         self.assertEqual(finalize.await_args.args[2], "@alice")
+
+    async def test_owner_messages_are_sent_to_all_admins(self) -> None:
+        bot = FakeOwnerBot()
+
+        with patch("app.handlers.settings.owner_chat_ids", (111, 222)):
+            await send_owner_message(bot, "lead")
+
+        self.assertEqual(bot.sent, [(111, "lead"), (222, "lead")])
+
+    async def test_owner_messages_continue_when_one_admin_fails(self) -> None:
+        bot = FakeOwnerBot(failing_chat_id=111)
+
+        with patch("app.handlers.settings.owner_chat_ids", (111, 222)), patch("app.handlers.logger.exception"):
+            await send_owner_message(bot, "lead")
+
+        self.assertEqual(bot.sent, [(222, "lead")])
 
 
 class ApplicationUserTests(unittest.TestCase):

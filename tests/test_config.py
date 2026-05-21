@@ -9,6 +9,7 @@ os.environ.setdefault("OWNER_CHAT_ID", "123456")
 from app.config import (
     is_railway_runtime,
     parse_bool,
+    resolve_owner_chat_ids,
     resolve_crm_enabled,
     resolve_crm_host,
     resolve_crm_port,
@@ -34,6 +35,15 @@ class ConfigParsingTests(unittest.TestCase):
         self.assertFalse(parse_bool(""))
         self.assertTrue(parse_bool("", default=True))
         self.assertTrue(parse_bool("later", default=True))
+
+    def test_resolve_owner_chat_ids_keeps_owner_and_default_extra_admin(self) -> None:
+        self.assertEqual(resolve_owner_chat_ids("123456", ""), (123456, 5768086346))
+
+    def test_resolve_owner_chat_ids_adds_comma_separated_admins_without_duplicates(self) -> None:
+        self.assertEqual(
+            resolve_owner_chat_ids("123456", "222, 5768086346, 123456"),
+            (123456, 222, 5768086346),
+        )
 
     def test_resolve_crm_port_prefers_railway_port(self) -> None:
         self.assertEqual(resolve_crm_port("12345", "8080"), 12345)
@@ -119,7 +129,14 @@ class ConfigParsingTests(unittest.TestCase):
     def test_settings_reads_admin_token(self) -> None:
         from app.config import Settings
 
-        settings = Settings(bot_token="123:abc", owner_chat_id=1, site_url="", tg_channel_url="", admin_token="secret")
+        settings = Settings(
+            bot_token="123:abc",
+            owner_chat_id=1,
+            owner_chat_ids=(1, 2),
+            site_url="",
+            tg_channel_url="",
+            admin_token="secret",
+        )
 
         self.assertEqual(settings.admin_token, "secret")
 
