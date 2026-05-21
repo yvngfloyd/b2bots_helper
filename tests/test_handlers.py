@@ -8,7 +8,13 @@ from unittest.mock import AsyncMock, patch
 os.environ.setdefault("BOT_TOKEN", "123:abc")
 os.environ.setdefault("OWNER_CHAT_ID", "123456")
 
-from app.handlers import QUESTIONS, build_start_owner_notification, process_choice, resolve_application_user
+from app.handlers import (
+    QUESTIONS,
+    build_start_owner_notification,
+    process_choice,
+    process_contact_method,
+    resolve_application_user,
+)
 from app.keyboards import contact_methods
 from app.states import LeadForm
 
@@ -74,6 +80,45 @@ class LeadFormQuestionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(state.state, LeadForm.contact_method)
         self.assertEqual(state.data["budget"], "Да")
         self.assertEqual(message.edited_text, "8/8. Как удобно с вами связаться?")
+
+    async def test_missing_username_prompts_for_manual_contact(self) -> None:
+        state = FakeFormState()
+        message = FakeMessage()
+        callback = SimpleNamespace(
+            data="contact_method:1",
+            from_user=SimpleNamespace(id=101, username=None),
+            message=message,
+            answer=AsyncMock(),
+        )
+
+        with patch("app.handlers.track_callback_user", new=AsyncMock()), patch(
+            "app.handlers.save_current_form_snapshot",
+            new=AsyncMock(),
+        ), patch("app.handlers.finalize_application", new=AsyncMock()) as finalize:
+            await process_contact_method(callback, state)
+
+        self.assertIs(state.state, LeadForm.manual_contact)
+        self.assertIn("не указан username", message.edited_text)
+        finalize.assert_not_awaited()
+
+    async def test_existing_username_finalizes_application(self) -> None:
+        state = FakeFormState()
+        message = FakeMessage()
+        callback = SimpleNamespace(
+            data="contact_method:1",
+            from_user=SimpleNamespace(id=101, username="alice"),
+            message=message,
+            answer=AsyncMock(),
+        )
+
+        with patch("app.handlers.track_callback_user", new=AsyncMock()), patch(
+            "app.handlers.finalize_application",
+            new=AsyncMock(),
+        ) as finalize:
+            await process_contact_method(callback, state)
+
+        finalize.assert_awaited_once()
+        self.assertEqual(finalize.await_args.args[2], "@alice")
 
 
 class ApplicationUserTests(unittest.TestCase):

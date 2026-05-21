@@ -419,7 +419,22 @@ async def process_contact_method(callback: CallbackQuery, state: FSMContext) -> 
 
     if answer == "Оставить свой user":
         username = callback.from_user.username
-        contact = f"@{username}" if username else "Username не указан"
+        if not username:
+            await state.set_state(LeadForm.manual_contact)
+            await save_current_form_snapshot(
+                callback.message,
+                state,
+                "manual_contact",
+                user_id=callback.from_user.id,
+            )
+            await callback.message.edit_text(
+                "У вас не указан username в Telegram. Напишите, пожалуйста, удобный контакт: "
+                "телефон, @username или ссылку на Telegram."
+            )
+            await callback.answer()
+            return
+
+        contact = f"@{username}"
         await finalize_application(callback.message, state, contact, user=callback.from_user)
         await callback.answer()
         return
